@@ -192,15 +192,23 @@ function PlanView({ result, onClear }: { result: PlanResponseSuccess; onClear: (
             <strong>{Math.round(result.weather.temperatureC)}°</strong>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-px bg-line sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-px bg-line sm:grid-cols-5">
           <div className="weather-stat"><span>Condition</span><strong>{result.weather.weatherDescription}</strong></div>
           <div className="weather-stat"><span>Humidity</span><strong>{Math.round(result.weather.humidityPct)}%</strong></div>
           <div className="weather-stat"><span>Rain now</span><strong>{result.weather.precipitationMm.toFixed(1)} mm</strong></div>
           <div className="weather-stat"><span>Wind</span><strong>{Math.round(result.weather.windSpeedKmh)} km/h</strong></div>
+          <div className="weather-stat">
+            <span>Weather risk</span>
+            <strong className="capitalize">{result.weather.weatherRisk ?? 'normal'}</strong>
+          </div>
         </div>
-        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line px-5 py-3 text-xs text-ink-faint">
-          <span>Observed {formatTime(result.weather.observedAt)} · refresh by {formatTime(result.validUntil)}</span>
-          <span className="tabular">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line px-5 py-3 text-xs text-ink-soft">
+          <span>
+            <span className="font-semibold text-ink">Live weather fact</span>
+            {' · '}Observed {formatTime(result.weather.observedAt)} · plan valid until{' '}
+            {formatTime(result.validUntil)}
+          </span>
+          <span className="tabular font-medium text-ink">
             Live GenAI · {result.timings.modelCalls} model call
             {result.timings.modelCalls === 1 ? '' : 's'} ·{' '}
             {(result.timings.totalMs / 1000).toFixed(1)}s
@@ -208,13 +216,63 @@ function PlanView({ result, onClear }: { result: PlanResponseSuccess; onClear: (
         </div>
       </section>
 
-      <section className={`alert-panel alert-${result.alertState}`} aria-labelledby="alert-title" aria-live="polite">
-        <div className="alert-icon" aria-hidden="true">{result.alertState === 'active' ? '!' : 'i'}</div>
-        <div>
-          <p className="eyebrow">Official alert status</p>
-          <h3 id="alert-title" className="mt-0.5 font-semibold capitalize">{result.alertState}</h3>
-          <p className="mt-1 text-sm leading-5 opacity-80">{result.alertSummary}</p>
+      <section
+        className={`alert-panel alert-${result.alertState}`}
+        aria-labelledby="alert-title"
+        aria-live="polite"
+      >
+        <div className="alert-icon" aria-hidden="true">
+          {result.alertState === 'active' || result.weather.weatherRisk === 'severe'
+            ? '!'
+            : 'i'}
         </div>
+        <div>
+          <p className="eyebrow">Real-time alert & risk status</p>
+          <h3 id="alert-title" className="mt-0.5 font-semibold">
+            Alert: <span className="capitalize">{result.alertState}</span>
+            {' · '}
+            Weather risk:{' '}
+            <span className="capitalize">{result.weather.weatherRisk ?? 'normal'}</span>
+          </h3>
+          <p className="mt-1 text-sm leading-5 opacity-90">{result.alertSummary}</p>
+          {result.weather.weatherRiskSummary && (
+            <p className="mt-2 text-sm leading-5 opacity-90">
+              <span className="font-semibold">Live weather risk: </span>
+              {result.weather.weatherRiskSummary}
+            </p>
+          )}
+        </div>
+      </section>
+
+      <section className="ms-card" aria-labelledby="align-title">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow text-leaf">Challenge coverage</p>
+            <h3 id="align-title">What this plan demonstrates</h3>
+          </div>
+        </div>
+        <ul className="mt-3 grid gap-2 sm:grid-cols-2 text-sm text-ink-soft">
+          {[
+            ['Personalized plan', 'AI-generated for your profile'],
+            ['Weather-aware guidance', result.weather.provider],
+            ['Emergency checklist', `${result.plan.checklist.length} live items`],
+            ['Safety recommendations', 'Do now / Do next'],
+            ['Travel advisory', result.plan.travel ? result.plan.travel.recommendation : 'Not requested'],
+            ['Multilingual', result.profile.language],
+            ['Real-time risk', result.weather.weatherRisk ?? 'normal'],
+            ['Before / during / after', result.profile.phase],
+            ['Individuals / families / communities', result.profile.scope],
+            ['Source-grounded GenAI', `${result.sources.length} sources`],
+          ].map(([label, value]) => (
+            <li key={label} className="flex items-start gap-2 rounded-lg border border-line px-3 py-2">
+              <span className="mt-0.5 text-leaf font-bold" aria-hidden="true">✓</span>
+              <span>
+                <strong className="text-ink">{label}</strong>
+                <span className="block text-xs">{value}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
       </section>
 
       <section className="ms-card" aria-labelledby="now-title">
@@ -361,8 +419,15 @@ export default function Home() {
   const [error, setError] = useState('');
   const [result, setResult] = useState<PlanResponseSuccess | null>(null);
   const statusRef = useRef<HTMLDivElement>(null);
+  const firstFieldRef = useRef<HTMLInputElement>(null);
 
-  const update = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm((current) => ({ ...current, [key]: value }));
+  const update = <K extends keyof FormState>(key: K, value: FormState[K]) => {
+    setForm((current) => ({ ...current, [key]: value }));
+    if (key === 'language' && typeof document !== 'undefined') {
+      const lang = value === 'Hindi' ? 'hi' : value === 'Kannada' ? 'kn' : 'en';
+      document.documentElement.lang = lang;
+    }
+  };
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -463,7 +528,7 @@ export default function Home() {
 
               <div className="mt-5">
                 <label htmlFor="locality" className="ms-label">Locality or pincode</label>
-                <div className="input-with-icon"><span aria-hidden="true">⌖</span><input id="locality" className="ms-input" value={form.locality} onChange={(e) => update('locality', e.target.value)} required maxLength={120} autoComplete="address-level2" placeholder="e.g. Indiranagar, Bengaluru" /></div>
+                <div className="input-with-icon"><span aria-hidden="true">⌖</span><input ref={firstFieldRef} id="locality" className="ms-input" value={form.locality} onChange={(e) => update('locality', e.target.value)} required maxLength={120} autoComplete="address-level2" placeholder="e.g. Indiranagar, Bengaluru" aria-required="true" /></div>
                 <p className="field-hint">Use a coarse location—never your street address.</p>
               </div>
 
@@ -508,7 +573,25 @@ export default function Home() {
           <div aria-busy={loading}>
             <div ref={statusRef} tabIndex={-1} role="status" aria-live="polite">
               {loading && <div className="loading-panel"><div className="rain-loader" aria-hidden="true"><i /><i /><i /></div><div><h2>Building your live plan</h2><p>Fetching live data and generating personalized actions. This can take up to a minute.</p></div></div>}
-              {error && <div className="error-panel" role="alert"><span aria-hidden="true">!</span><div><h2>We couldn’t create a safe plan</h2><p>{error}</p><button type="button" className="ms-btn-ghost mt-3" onClick={() => setError('')}>Try again</button></div></div>}
+              {error && (
+                <div className="error-panel" role="alert" aria-live="assertive">
+                  <span aria-hidden="true">!</span>
+                  <div>
+                    <h2 id="error-title">We couldn’t create a safe plan</h2>
+                    <p id="error-desc">{error}</p>
+                    <button
+                      type="button"
+                      className="ms-btn-ghost mt-3"
+                      onClick={() => {
+                        setError('');
+                        firstFieldRef.current?.focus();
+                      }}
+                    >
+                      Try again
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {!loading && !error && result && <PlanView result={result} onClear={clearPlan} />}

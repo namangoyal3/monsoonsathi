@@ -5,7 +5,7 @@ import {
   sanitizePlanSourceIds,
   validatePlanSemantics,
 } from '@/lib/validate-plan';
-import { describeWeatherCode } from '@/lib/weather';
+import { classifyWeatherRisk, describeWeatherCode } from '@/lib/weather';
 import { checkRateLimit } from '@/lib/rateLimit';
 import type { Evidence, GeneratedPlan } from '@/types/contract';
 
@@ -202,6 +202,27 @@ describe('weather helpers', () => {
   it('maps rain and clear-ish codes', () => {
     expect(describeWeatherCode(500).toLowerCase()).toContain('rain');
     expect(describeWeatherCode(800).toLowerCase()).toContain('clear');
+  });
+
+  it('classifies thunderstorm as severe weather risk', () => {
+    const r = classifyWeatherRisk({
+      weatherCode: 202,
+      precipitationMm: 1,
+      windSpeedKmh: 10,
+      forecastPrecipMm: 0,
+    });
+    expect(r.risk).toBe('severe');
+    expect(r.summary.toLowerCase()).toContain('not an official');
+  });
+
+  it('classifies calm weather as normal risk', () => {
+    const r = classifyWeatherRisk({
+      weatherCode: 800,
+      precipitationMm: 0,
+      windSpeedKmh: 5,
+      forecastPrecipMm: 0,
+    });
+    expect(r.risk).toBe('normal');
   });
 });
 

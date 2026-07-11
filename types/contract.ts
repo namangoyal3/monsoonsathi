@@ -6,6 +6,8 @@ export type Language = 'English' | 'Hindi' | 'Kannada';
 export type TransportMode = 'walk' | 'two_wheeler' | 'car' | 'public_transit' | 'other';
 
 export type AlertState = 'active' | 'none' | 'unavailable' | 'stale';
+/** Weather-derived risk from live conditions — not an IMD/NDMA bulletin. */
+export type WeatherRisk = 'normal' | 'elevated' | 'severe';
 export type ActionPriority = 'critical' | 'high' | 'normal';
 export type ActionTimeframe =
   | 'now'
@@ -117,6 +119,8 @@ export interface LiveWeatherSnapshot {
   observedAt: string;
   forecastSummary: string;
   nextHours: Array<{ time: string; tempC: number; precipMm: number; description: string }>;
+  weatherRisk: WeatherRisk;
+  weatherRiskSummary: string;
 }
 
 export interface PlanResponseSuccess {
