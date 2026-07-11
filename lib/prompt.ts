@@ -53,7 +53,7 @@ FEATURE COVERAGE (every request)
 6) Before / during / after — selectedPhase + otherPhaseSummaries for all three phases.
 7) Multilingual — ALL user-facing strings in REQUESTED_LANGUAGE (English, Hindi, or Kannada).
 8) Family / community supportActions when needs or community scope apply (privacy-safe labels).
-9) Travel — if DEST=yes, full travel object grounded in weather + route evidence; never flood-safe claims. If DEST=no, travel null.
+9) Travel — if DEST=yes, full travel object grounded in weather + route evidence; recommendation must be delay, reconsider, or insufficient_data, never go. Never make flood-safe claims. If DEST=no, travel null.
 
 ═══════════════════════════════════════
 PRIORITY ORDER
@@ -165,7 +165,7 @@ Requirements for THIS response:
 2. doNow, doNext, checklist, selectedPhase must be non-empty and specific to live weather + profile.
 3. If SUPPORT_NEEDS is not empty, supportActions must include personalized items for those needs.
 4. If SCOPE is community, supportActions must be privacy-safe community coordinator actions.
-5. If DESTINATION_PROVIDED is yes, travel must be a full object grounded in weather/route evidence — never flood-safe claims.
+5. If DESTINATION_PROVIDED is yes, travel must be a full object grounded in weather/route evidence with recommendation delay, reconsider, or insufficient_data — never go and never make flood-safe claims.
 6. If DESTINATION_PROVIDED is no, travel must be null.
 7. otherPhaseSummaries must include before, during, and after — each specific, not empty placeholders.
 8. limitations must mention uncertainty / official-channel limits honestly.

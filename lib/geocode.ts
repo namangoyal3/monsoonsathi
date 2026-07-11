@@ -52,7 +52,8 @@ export async function geocodeLocality(locality: string): Promise<GeocodedLocatio
   if (!hit || !Number.isFinite(hit.lat) || !Number.isFinite(hit.lon)) {
     throw new AppError(
       'LOCATION_NOT_FOUND',
-      `Could not resolve “${q}”. Try a city name or pincode (e.g. Bengaluru).`,
+      // Never echo raw user input back into the error surface (reflected-injection risk).
+      'Could not find that location. Try a full city name or pincode (e.g. Bengaluru or 560038).',
       400
     );
   }

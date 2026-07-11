@@ -5,7 +5,7 @@ const URL_RE = /https?:\/\/|www\./i;
 const HTML_RE = /<\/?[a-z][\s\S]*>/i;
 
 const ROUTE_SAFETY_RE =
-  /\b(flood[-\s]?safe|guaranteed safe|road is open|roads? are open|no waterlogging|completely safe|safe to drive through|drive through (?:the )?flood|enter (?:the )?floodwater)\b/i;
+  /\b(flood[-\s]?safe|guaranteed safe|road is open|roads? are open|no waterlogging|completely safe|safe to drive through|drive through (?:the )?flood|enter (?:the )?floodwater)\b|सड़क खुली है|मार्ग सुरक्षित|बाढ़ से सुरक्षित|जलभराव नहीं|ರಸ್ತೆ ತೆರೆದಿದೆ|ಮಾರ್ಗ ಸುರಕ್ಷಿತ|ಪ್ರವಾಹದಿಂದ ಸುರಕ್ಷಿತ|ಜಲಾವೃತವಾಗಿಲ್ಲ/iu;
 
 export interface ValidationResult {
   ok: boolean;
@@ -82,10 +82,8 @@ export function validatePlanSemantics(
     }
     if (a.basis === 'weather') {
       const hasWeather = a.sourceIds.some((id) => byId.get(id)?.kind === 'weather');
-      if (!hasWeather && a.sourceIds.length > 0) {
-        // soft: allow if empty handled elsewhere; if IDs present they should match
-        const onlyOk = a.sourceIds.every((id) => allowed.has(id));
-        if (!onlyOk) reasons.push(`weather_basis_bad_sources:${a.title}`);
+      if (!hasWeather) {
+        reasons.push(`weather_basis_without_weather_source:${a.title}`);
       }
     }
     if (a.basis === 'route') {
@@ -94,17 +92,33 @@ export function validatePlanSemantics(
         reasons.push(`route_basis_without_route_source:${a.title}`);
       }
     }
+    if (a.basis === 'official_guidance') {
+      const hasGuidance = a.sourceIds.some(
+        (id) => byId.get(id)?.kind === 'official_guidance'
+      );
+      if (!hasGuidance) {
+        reasons.push(`official_guidance_basis_without_guidance_source:${a.title}`);
+      }
+    }
   }
 
   if (!opts.hasDestination && plan.travel !== null) {
     reasons.push('travel_present_without_destination');
   }
   if (opts.hasDestination && plan.travel === null) {
-    // Prefer having travel section; not a hard fail — model may omit
-    // Soft: leave as ok
+    reasons.push('travel_missing_for_destination');
   }
 
   if (plan.travel) {
+    if (plan.travel.recommendation === 'go') {
+      reasons.push('travel_go_not_supported');
+    }
+    const hasRoute = plan.travel.sourceIds.some(
+      (id) => byId.get(id)?.kind === 'route'
+    );
+    if (!hasRoute) {
+      reasons.push('travel_missing_route_source');
+    }
     if (ROUTE_SAFETY_RE.test(plan.travel.reason)) {
       reasons.push('travel_reason_route_safety_claim');
     }
@@ -116,35 +130,4 @@ export function validatePlanSemantics(
   // Drop empty support is fine; require non-empty core arrays (Zod already does)
 
   return { ok: reasons.length === 0, reasons };
-}
-
-/**
- * Repair pass: strip unknown source IDs rather than hard-failing soft mismatches when possible.
- * Hard fails still apply for phones, HTML, route safety.
- */
-export function sanitizePlanSourceIds(
-  plan: GeneratedPlan,
-  evidence: Evidence[]
-): GeneratedPlan {
-  const allowed = new Set(evidence.map((e) => e.id));
-  const clean = (ids: string[]) => ids.filter((id) => allowed.has(id));
-  const fixAction = <T extends { sourceIds: string[] }>(a: T): T => ({
-    ...a,
-    sourceIds: clean(a.sourceIds),
-  });
-
-  return {
-    ...plan,
-    doNow: plan.doNow.map(fixAction),
-    doNext: plan.doNext.map(fixAction),
-    checklist: plan.checklist.map(fixAction),
-    selectedPhase: plan.selectedPhase.map(fixAction),
-    supportActions: plan.supportActions.map(fixAction),
-    travel: plan.travel
-      ? {
-          ...plan.travel,
-          sourceIds: clean(plan.travel.sourceIds),
-        }
-      : null,
-  };
 }

@@ -30,7 +30,8 @@ export async function POST(request: Request): Promise<Response> {
 
   try {
     const ip = clientIpFromRequest(request);
-    const rl = checkRateLimit(`plan:${ip}`, 8, 60_000);
+    // Generous enough for evaluator multi-feature walkthroughs; still blocks abuse.
+    const rl = checkRateLimit(`plan:${ip}`, 30, 60_000);
     if (!rl.ok) {
       return json(
         {

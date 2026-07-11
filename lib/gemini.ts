@@ -6,10 +6,7 @@ import {
   buildSystemPrompt,
   buildUserPrompt,
 } from '@/lib/prompt';
-import {
-  sanitizePlanSourceIds,
-  validatePlanSemantics,
-} from '@/lib/validate-plan';
+import { validatePlanSemantics } from '@/lib/validate-plan';
 import type { Evidence, GeneratedPlan, Profile } from '@/types/contract';
 
 /**
@@ -269,8 +266,8 @@ function parsePlan(raw: string): GeneratedPlan {
     console.error(
       JSON.stringify({
         code: 'GEMINI_INVALID_JSON_DETAIL',
-        sample: raw.slice(0, 240),
-        err: e instanceof Error ? e.message : String(e),
+        outputLength: raw.length,
+        errorName: e instanceof Error ? e.name : 'UnknownError',
       })
     );
     throw new AppError(
@@ -318,7 +315,7 @@ export function assertGenAiCompleteness(
       502
     );
   }
-  if (plan.checklist.length < 3) {
+  if (plan.checklist.length < 4) {
     throw new AppError(
       'GEMINI_INCOMPLETE',
       'Model emergency checklist incomplete.',
@@ -391,6 +388,8 @@ export function assertGenAiCompleteness(
 async function geminiComplete(
   system: string,
   user: string,
+  signal: AbortSignal,
+  onCall: () => void,
   useSchema = true
 ): Promise<string> {
   const key = getGeminiApiKey();
@@ -404,35 +403,49 @@ async function geminiComplete(
     generationConfig.responseJsonSchema = GEMINI_RESPONSE_SCHEMA;
   }
 
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': key,
-      },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: system }] },
-        contents: [{ role: 'user', parts: [{ text: user }] }],
-        generationConfig,
-      }),
-      signal: AbortSignal.timeout(55_000),
-    }
-  );
+  onCall();
+  let res: Response;
+  try {
+    res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': key,
+        },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: system }] },
+          contents: [{ role: 'user', parts: [{ text: user }] }],
+          generationConfig,
+        }),
+        signal,
+      }
+    );
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        code: 'GEMINI_FETCH_FAILED',
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      })
+    );
+    throw new AppError(
+      'GEMINI_UNAVAILABLE',
+      'The AI service did not respond in time. Please try again.',
+      503
+    );
+  }
 
   if (!res.ok) {
-    const errBody = await res.text().catch(() => '');
     console.error(
       JSON.stringify({
         code: 'GEMINI_HTTP_DETAIL',
         status: res.status,
-        detail: errBody.slice(0, 600),
       })
     );
     // Schema too heavy or rejected → retry without JSON schema (still real Gemini)
     if (useSchema && res.status === 400) {
-      return geminiComplete(system, user, false);
+      return geminiComplete(system, user, signal, onCall, false);
     }
     throw new AppError(
       'GEMINI_HTTP',
@@ -465,7 +478,7 @@ async function geminiComplete(
   if (!text.trim()) {
     // Truncation / empty with schema → retry without schema once
     if (useSchema) {
-      return geminiComplete(system, user, false);
+      return geminiComplete(system, user, signal, onCall, false);
     }
     throw new AppError('GEMINI_EMPTY', 'Gemini returned an empty response.', 502);
   }
@@ -488,15 +501,15 @@ export async function generateMonsoonPlan(
   profile: Profile,
   evidence: Evidence[],
   alertState: string,
-  alertSummary: string
+  alertSummary: string,
+  signal: AbortSignal = AbortSignal.timeout(55_000)
 ): Promise<GeneratePlanResult> {
   const t0 = Date.now();
   const system = buildSystemPrompt();
   let modelCalls = 0;
 
   const runOnce = async (user: string): Promise<GeneratedPlan> => {
-    modelCalls += 1;
-    const raw = await geminiComplete(system, user);
+    const raw = await geminiComplete(system, user, signal, () => modelCalls++);
     const plan = parsePlan(raw);
 
     // Destination rule is structural (not content invention)
@@ -504,56 +517,21 @@ export async function generateMonsoonPlan(
       plan.travel = null;
     }
 
-    const sanitized = sanitizePlanSourceIds(plan, evidence);
-    assertGenAiCompleteness(sanitized, profile);
+    assertGenAiCompleteness(plan, profile);
 
-    const semantic = validatePlanSemantics(sanitized, evidence, {
+    const semantic = validatePlanSemantics(plan, evidence, {
       hasDestination: Boolean(profile.destination?.trim()),
       alertState,
     });
 
-    const hard = semantic.reasons.filter(
-      (r) =>
-        r.startsWith('invented') ||
-        r.startsWith('html') ||
-        r.startsWith('unsupported') ||
-        r.startsWith('travel_reason') ||
-        r.startsWith('travel_caution') ||
-        r.startsWith('travel_present')
-    );
-    if (hard.length) {
+    if (!semantic.ok) {
       throw new AppError(
         'GEMINI_UNSAFE',
-        `Personalized guidance failed safety validation (${hard[0]}).`,
+        `Personalized guidance failed safety validation (${semantic.reasons[0]}).`,
         502
       );
     }
-
-    // Soft-fix official_alert basis without inventing new action text
-    if (alertState !== 'active') {
-      const fixBasis = <T extends { basis: string; sourceIds: string[] }>(
-        a: T
-      ): T => {
-        if (a.basis !== 'official_alert') return a;
-        const weatherId =
-          evidence.find((e) => e.kind === 'weather')?.id ?? a.sourceIds[0] ?? '';
-        return {
-          ...a,
-          basis: 'weather',
-          sourceIds: a.sourceIds.length ? a.sourceIds : weatherId ? [weatherId] : [],
-        };
-      };
-      return {
-        ...sanitized,
-        doNow: sanitized.doNow.map(fixBasis),
-        doNext: sanitized.doNext.map(fixBasis),
-        checklist: sanitized.checklist.map(fixBasis),
-        selectedPhase: sanitized.selectedPhase.map(fixBasis),
-        supportActions: sanitized.supportActions.map(fixBasis),
-      };
-    }
-
-    return sanitized;
+    return plan;
   };
 
   try {
@@ -563,13 +541,9 @@ export async function generateMonsoonPlan(
     return { plan, geminiMs: Date.now() - t0, modelCalls };
   } catch (first) {
     const reason =
-      first instanceof AppError
-        ? `${first.code}: ${first.message}`
-        : first instanceof Error
-          ? first.message
-          : 'unknown';
+      first instanceof AppError ? first.code : 'UNKNOWN';
     console.error(
-      JSON.stringify({ code: 'GEMINI_REPAIR', reason: reason.slice(0, 240) })
+      JSON.stringify({ code: 'GEMINI_REPAIR', reason })
     );
 
     // One more real Gemini call — still no hardcoded plan content
