@@ -12,8 +12,8 @@ MonsoonSathi is a **monsoon action planner** (not a weather dashboard or chatbot
 
 1. You describe locality, scope (individual / family / community), phase (before / during / after), language, and optional travel destination.
 2. The server resolves the location and fetches **live weather** (OpenWeather).
-3. **One Gemini structured-output call** produces a personalized plan.
-4. Server-side Zod + safety validation rejects bad source IDs, phone numbers, HTML, and unsupported “flood-safe route” claims.
+3. **Live Gemini structured output** produces a personalized plan; invalid output gets one real repair attempt, never a canned fallback.
+4. Server-side Zod + safety validation rejects unsupported evidence citations, phone numbers, HTML, “flood-safe route” claims, and affirmative travel clearance.
 5. The dashboard clearly labels **live weather facts** vs **AI-generated guidance**.
 
 ## Stack
@@ -27,13 +27,14 @@ MonsoonSathi is a **monsoon action planner** (not a weather dashboard or chatbot
 
 ```bash
 cd code/monsoonsathi
-npm install
+npm ci
 cp .env.example .env.local
 # set GEMINI_API_KEY and OPENWEATHER_API_KEY
 npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) (or the port Next prints).
+Requires Node.js 20.9 or newer.
 
 ### Environment
 
@@ -42,7 +43,7 @@ Copy `.env.example` → `.env.local` (and optionally `.env`). **Never commit rea
 | Variable | Required | Notes |
 |---|---|---|
 | `GEMINI_API_KEY` | yes | Server-only GenAI key |
-| `GEMINI_MODEL` | no | Default in code if unset (e.g. `gemini-2.5-flash` / `gemini-flash-lite-latest`) |
+| `GEMINI_MODEL` | no | Defaults to `gemini-flash-lite-latest` |
 | `OPENWEATHER_API_KEY` | yes | Server-only live weather + geocoding |
 
 Both keys are read only in server code via `lib/env.ts` — never `NEXT_PUBLIC_*`.
@@ -55,7 +56,8 @@ npm run typecheck
 npm run selfcheck   # deterministic validation tests
 npm test            # unit tests
 npm run build
-npm run verify      # typecheck + selfcheck + unit tests + build
+npm run verify      # lint + typecheck + selfcheck + unit tests + build
+npm run verify:live # verify + serial Playwright tests against live providers
 ```
 
 ## Live services
@@ -64,16 +66,18 @@ npm run verify      # typecheck + selfcheck + unit tests + build
 |---|---|---|
 | OpenWeather Geocoding | Resolve locality | 400 if not found |
 | OpenWeather Forecast | Current + hourly weather | Blocks plan if unavailable |
+| OpenWeather One Call alerts | Best-effort publisher alerts | Labeled `unavailable` when the key/plan cannot access them |
+| OSRM public routing | Car time/distance estimate only | Falls back to straight-line context; never claims passability |
 | Gemini | Personalized plan | 502 with clear error; no canned plan |
 | NDMA guidance snapshot | Official preparedness bullets | Versioned static evidence |
 
-**Alert honesty:** This build does not invent IMD/NDMA public alerts. Alert state is `unavailable` with an explicit message. Empty ≠ invented active alert.
+**Alert honesty:** This build never presents weather-derived risk as an IMD/NDMA alert. OpenWeather publisher alerts are used only when returned live; otherwise the state is honestly `none` or `unavailable`.
 
 ## GenAI usage
 
 | Input | Gemini task | Validation |
 |---|---|---|
-| Profile + verified evidence packet | Structured action plan in chosen language | Zod schema + source ID + prohibited claim scan |
+| Profile + verified evidence packet | Structured action plan in chosen language | Zod schema + matching evidence-kind checks + prohibited claim scan |
 
 Deterministic code owns: input validation, geocoding, weather fetch, source IDs, claim rejection, timestamps.
 
@@ -89,8 +93,8 @@ Deterministic code owns: input validation, geocoding, weather fetch, source IDs,
 ## Testing
 
 ```bash
-npm run selfcheck
-npm test
+npm run verify
+npm run verify:live
 ```
 
 Manual production smoke:
@@ -108,8 +112,8 @@ See [docs/ALIGNMENT.md](docs/ALIGNMENT.md).
 
 ## Limitations
 
-- Official India weather-alert feed not integrated (status shown as unavailable — never invented).
-- Travel uses coarse geocoded distance context, not live traffic / flood maps.
+- An authoritative India-specific alert feed is not integrated; OpenWeather publisher alerts are best-effort and clearly labeled.
+- Car travel can use OSRM time/distance; other modes use straight-line context. Neither includes live traffic, road closure, or flood-passability data.
 - Language is chosen before generation (no post-hoc silent translation).
 - Not a substitute for official emergency instructions.
 
@@ -126,8 +130,9 @@ Executed against the public URL on 11 July 2026:
 | Check | Measured result |
 |---|---|
 | Homepage | HTTP 200; CSP, `X-Content-Type-Options`, `X-Frame-Options`, and strict referrer policy present |
-| Bengaluru individual plan | HTTP 200; OpenWeather; 3 evidence sources; 2 do-now actions; 4 checklist actions |
-| GenAI execution | Gemini `modelCalls: 1`; 5.379 s server time |
+| Bengaluru individual plan | HTTP 200; fresh OpenWeather observation; 4 evidence sources; 2 do-now actions; 4 checklist actions |
+| Bengaluru → Electronic City car plan | HTTP 200; live OSRM route evidence; recommendation `reconsider`, never `go` |
+| GenAI execution | Gemini `modelCalls: 1` on both measured requests; 4.404 s and 5.599 s generation times |
 | Alert honesty | `alertState: unavailable`; no alert was invented |
 
 ### Judge demo (3 min)
@@ -141,4 +146,4 @@ Executed against the public URL on 11 July 2026:
 
 ### 60s pitch
 
-> MonsoonSathi turns live OpenWeather data into personalized monsoon actions with one Gemini call—individuals, families, and communities; before, during, and after; English, Hindi, and Kannada—with server-side safety validation and zero hardcoded AI results.
+> MonsoonSathi turns live OpenWeather data into personalized monsoon actions with live Gemini generation—individuals, families, and communities; before, during, and after; English, Hindi, and Kannada—with server-side evidence validation and zero hardcoded AI results.

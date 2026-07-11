@@ -385,12 +385,15 @@ export function assertGenAiCompleteness(
   }
 }
 
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
 async function geminiComplete(
   system: string,
   user: string,
   signal: AbortSignal,
   onCall: () => void,
-  useSchema = true
+  useSchema = true,
+  transientRetried = false
 ): Promise<string> {
   const key = getGeminiApiKey();
   const model = getGeminiModel();
@@ -423,12 +426,20 @@ async function geminiComplete(
       }
     );
   } catch (error) {
+    const aborted =
+      signal.aborted ||
+      (error instanceof Error && error.name === 'AbortError');
     console.error(
       JSON.stringify({
         code: 'GEMINI_FETCH_FAILED',
         errorName: error instanceof Error ? error.name : 'UnknownError',
       })
     );
+    // One bounded retry on a transient network failure — still a real Gemini call.
+    if (!aborted && !transientRetried) {
+      await sleep(1200);
+      return geminiComplete(system, user, signal, onCall, useSchema, true);
+    }
     throw new AppError(
       'GEMINI_UNAVAILABLE',
       'The AI service did not respond in time. Please try again.',
@@ -445,7 +456,17 @@ async function geminiComplete(
     );
     // Schema too heavy or rejected → retry without JSON schema (still real Gemini)
     if (useSchema && res.status === 400) {
-      return geminiComplete(system, user, signal, onCall, false);
+      return geminiComplete(system, user, signal, onCall, false, transientRetried);
+    }
+    // One bounded retry on a transient upstream failure (quota burst / 5xx) —
+    // still a real Gemini call, never a mock.
+    if (
+      !transientRetried &&
+      !signal.aborted &&
+      (res.status === 429 || res.status >= 500)
+    ) {
+      await sleep(res.status === 429 ? 2500 : 1200);
+      return geminiComplete(system, user, signal, onCall, useSchema, true);
     }
     throw new AppError(
       'GEMINI_HTTP',
@@ -478,7 +499,7 @@ async function geminiComplete(
   if (!text.trim()) {
     // Truncation / empty with schema → retry without schema once
     if (useSchema) {
-      return geminiComplete(system, user, signal, onCall, false);
+      return geminiComplete(system, user, signal, onCall, false, transientRetried);
     }
     throw new AppError('GEMINI_EMPTY', 'Gemini returned an empty response.', 502);
   }

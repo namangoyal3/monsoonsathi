@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { reserveLivePlanSlot } from './throttle';
 
 const scenarios = [
   { name: 'family during English', demo: /family · during · en/i, lang: 'en', support: true },
@@ -9,9 +10,11 @@ const scenarios = [
 
 for (const scenario of scenarios) {
   test(`live demo: ${scenario.name}`, async ({ page }) => {
-    test.setTimeout(100_000);
+    test.setTimeout(180_000);
     await page.goto('/');
     await page.getByRole('button', { name: scenario.demo }).click();
+    // Pace live submits to protect provider quotas across consecutive runs.
+    await reserveLivePlanSlot();
     await page.getByRole('button', { name: /create my live monsoon plan/i }).click();
 
     await expect(page.locator('#plan-title')).toBeVisible({ timeout: 65_000 });

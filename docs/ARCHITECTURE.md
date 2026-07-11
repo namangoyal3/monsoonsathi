@@ -4,16 +4,16 @@
 |---|---|---|
 | Locality resolution | OpenWeather Geocoding API | Zod bounds; no guessed coordinates |
 | Current weather & forecast | OpenWeather current + forecast | Cache 4m public only; fail closed if missing |
-| Official alert state | Honest `unavailable` without inventing alerts | Never fabricate active alerts |
+| Publisher alert state | Best-effort OpenWeather One Call alerts | `active`, `none`, or honest `unavailable`; never relabel weather risk as an official bulletin |
 | Personalized plan | **Gemini** | Completeness + Zod |
 | Emergency checklist | **Gemini** | Min 4 model items; no static checklist |
-| Do now / Do next | **Gemini** | Safety scan; source IDs |
+| Do now / Do next | **Gemini** | Safety scan; matching evidence kinds |
 | Family / community actions | **Gemini** from profile flags | Privacy-safe labels; no identity storage |
 | Before / during / after | **Gemini** `selectedPhase` + summaries | Phase enum only |
 | Multilingual EN/HI/KN | **Gemini** generates in chosen language | No translation table |
-| Travel advisory | **Gemini** + optional distance evidence | Flood-safe claims rejected |
+| Travel advisory | **Gemini** + OpenWeather geocoding; OSRM estimate for cars, straight-line context otherwise | Route evidence required; `go` and flood-safe claims rejected |
 | Safety recommendations | **Gemini** prioritized by profile + weather | Prompt injection isolated |
-| Sources panel | Server evidence IDs | Model may only cite those IDs |
+| Sources panel | Server evidence IDs | Model may cite only supplied IDs of the matching kind |
 | Demo chips | Form prefill only | Still requires live Gemini on submit |
 | Rate limiting / headers | App code | Not user-facing plan content |
 

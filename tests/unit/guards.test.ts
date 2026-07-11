@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ProfileSchema, GeneratedPlanSchema } from '@/lib/schema';
-import { coercePlanShape } from '@/lib/gemini';
+import { coercePlanShape, generateMonsoonPlan } from '@/lib/gemini';
 import { validatePlanSemantics } from '@/lib/validate-plan';
 import { classifyWeatherRisk, describeWeatherCode } from '@/lib/weather';
 import { checkRateLimit } from '@/lib/rateLimit';
@@ -133,6 +133,45 @@ describe('coercePlanShape', () => {
       doNow: [{ priority: 'high', instruction: 'only instruction' }],
     }) as Record<string, unknown>;
     expect(coerced.doNow).toEqual([]);
+  });
+});
+
+describe('Gemini transient retry', () => {
+  it('retries a 503 exactly once, then fails without a fallback plan', async () => {
+    const originalKey = process.env.GEMINI_API_KEY;
+    process.env.GEMINI_API_KEY = 'test-key';
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response('', { status: 503 }));
+
+    try {
+      const pending = generateMonsoonPlan(
+        {
+          locality: 'Bengaluru',
+          scope: 'individual',
+          phase: 'before',
+          language: 'English',
+          transportMode: 'walk',
+        },
+        evidence,
+        'unavailable',
+        'Official alert feed unavailable.',
+        new AbortController().signal
+      );
+      const rejected = expect(pending).rejects.toMatchObject({
+        code: 'GEMINI_HTTP',
+      });
+
+      await vi.runAllTimersAsync();
+      await rejected;
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      fetchMock.mockRestore();
+      vi.useRealTimers();
+      if (originalKey === undefined) delete process.env.GEMINI_API_KEY;
+      else process.env.GEMINI_API_KEY = originalKey;
+    }
   });
 });
 

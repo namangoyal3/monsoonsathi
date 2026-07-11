@@ -11,7 +11,7 @@ There is **no demo mode**, **no canned plan**, and **no hardcoded checklist / do
 | Live weather & geocoding | Deterministic OpenWeather APIs |
 | NDMA guidance bullets as evidence IDs | Versioned static **input** to the model (not the plan itself) |
 | Personalized plan, checklist, travel, multilingual text, family/community actions, phase guidance | **Gemini only** |
-| Schema, source-ID subset, phone/HTML/flood-safe rejection | Deterministic validators |
+| Schema, matching evidence kind, phone/HTML/flood-safe/affirmative-travel rejection | Deterministic validators |
 | Rate limit, secrets, headers | Deterministic security |
 
 ## Request flow
@@ -26,16 +26,18 @@ Zod validate ──► live geocode ──► live weather (+ optional route con
 Verified evidence packet (source IDs)
         │
         ▼
-ONE Gemini structured JSON call
+Live Gemini structured JSON call
         │
         ▼
 coerce enums only → Zod schema → completeness checks → safety scan
+        │ invalid/unsafe
+        └──────────────► one live Gemini repair attempt → validate again
         │
         ▼
 Dashboard (labels: Live weather fact vs AI-generated guidance)
 ```
 
-On incomplete/invalid model output the API returns an **honest error**. It never substitutes a hardcoded plan.
+On incomplete/invalid model output the API makes at most one plan-repair attempt with Gemini, then returns an **honest error**. It never substitutes a hardcoded plan. A schema-mode empty response may also be retried without response-schema enforcement; every provider request is counted in `modelCalls`.
 
 ## What Gemini generates (every successful plan)
 
@@ -51,11 +53,11 @@ On incomplete/invalid model output the API returns an **honest error**. It never
 
 ## Model configuration
 
-- Model: `gemini-flash-lite-latest` (configurable via `GEMINI_MODEL`)
+- Model: configurable via `GEMINI_MODEL` (default `gemini-flash-lite-latest`)
 - `responseMimeType: application/json`
 - Compact hand-written `responseJsonSchema`
-- Temperature `0.35` for personalization diversity
-- Post-validation: Zod + `assertGenAiCompleteness` + prohibited-claim scan
+- Temperature `0.3`
+- Post-validation: Zod + `assertGenAiCompleteness` + matching evidence-kind, official-alert, and prohibited-claim checks
 
 ## Proof on each response
 
@@ -70,7 +72,7 @@ Successful API responses include:
 }
 ```
 
-`modelCalls >= 1` is required for success — a path that never called Gemini cannot return `ok: true`.
+`modelCalls >= 1` is required for success — a path that never called Gemini cannot return `ok: true`. The count can exceed one only for a live provider/schema retry or one live plan-repair attempt.
 
 ## Demo chips
 
