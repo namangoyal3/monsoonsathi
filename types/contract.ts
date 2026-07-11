@@ -140,6 +140,8 @@ export interface PlanResponseSuccess {
     weatherMs: number;
     geminiMs: number;
     totalMs: number;
+    /** Number of real Gemini API calls for this plan (never zero on success). */
+    modelCalls: number;
   };
 }
 

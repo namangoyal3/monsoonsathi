@@ -12,19 +12,27 @@ export class AppError extends Error {
 
 export function toPublicError(err: unknown): { status: number; body: { ok: false; error: string; code?: string } } {
   if (err instanceof AppError) {
+    if (err.status >= 500) {
+      return {
+        status: err.status,
+        body: {
+          ok: false,
+          error: 'A live service could not complete the request. Please try again.',
+          code: 'SERVICE_UNAVAILABLE',
+        },
+      };
+    }
     return {
       status: err.status,
       body: { ok: false, error: err.message, code: err.code },
     };
   }
-  const message = err instanceof Error ? err.message : 'Unexpected server error.';
-  // Never leak stack traces or secrets
-  const safe =
-    message.includes('API_KEY') || message.includes('api key')
-      ? 'A required live service is not configured.'
-      : message.slice(0, 240);
   return {
     status: 500,
-    body: { ok: false, error: safe, code: 'INTERNAL' },
+    body: {
+      ok: false,
+      error: 'An unexpected error occurred. Please try again.',
+      code: 'INTERNAL',
+    },
   };
 }

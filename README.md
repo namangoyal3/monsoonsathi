@@ -11,7 +11,7 @@
 MonsoonSathi is a **monsoon action planner** (not a weather dashboard or chatbot):
 
 1. You describe locality, scope (individual / family / community), phase (before / during / after), language, and optional travel destination.
-2. The server resolves the location and fetches **live weather** (Open-Meteo).
+2. The server resolves the location and fetches **live weather** (OpenWeather).
 3. **One Gemini structured-output call** produces a personalized plan.
 4. Server-side Zod + safety validation rejects bad source IDs, phone numbers, HTML, and unsupported “flood-safe route” claims.
 5. The dashboard clearly labels **live weather facts** vs **AI-generated guidance**.
@@ -21,7 +21,7 @@ MonsoonSathi is a **monsoon action planner** (not a weather dashboard or chatbot
 - Next.js (App Router) + TypeScript + Tailwind
 - Zod validation
 - Gemini API (`GEMINI_API_KEY`)
-- Open-Meteo (live weather + geocoding, no key)
+- OpenWeather (live weather + geocoding)
 
 ## Setup
 
@@ -29,7 +29,7 @@ MonsoonSathi is a **monsoon action planner** (not a weather dashboard or chatbot
 cd code/monsoonsathi
 npm install
 cp .env.example .env.local
-# set GEMINI_API_KEY
+# set GEMINI_API_KEY and OPENWEATHER_API_KEY
 npm run dev
 ```
 
@@ -40,8 +40,8 @@ Open [http://localhost:3000](http://localhost:3000).
 | Variable | Required | Notes |
 |---|---|---|
 | `GEMINI_API_KEY` | yes | Server-only |
-| `GEMINI_MODEL` | no | Default `gemini-2.0-flash` |
-| `GOOGLE_MAPS_API_KEY` | no | Reserved for optional Google Weather/Routes upgrade |
+| `GEMINI_MODEL` | no | Default `gemini-flash-lite-latest` |
+| `OPENWEATHER_API_KEY` | yes | Server-only live weather |
 
 ## Scripts
 
@@ -49,16 +49,17 @@ Open [http://localhost:3000](http://localhost:3000).
 npm run dev
 npm run typecheck
 npm run selfcheck   # deterministic validation tests
+npm test            # unit tests
 npm run build
-npm run verify      # typecheck + selfcheck + build
+npm run verify      # typecheck + selfcheck + unit tests + build
 ```
 
 ## Live services
 
 | Service | Purpose | Honest failure |
 |---|---|---|
-| Open-Meteo Geocoding | Resolve locality | 400 if not found |
-| Open-Meteo Forecast | Current + hourly weather | Blocks plan if unavailable |
+| OpenWeather Geocoding | Resolve locality | 400 if not found |
+| OpenWeather Forecast | Current + hourly weather | Blocks plan if unavailable |
 | Gemini | Personalized plan | 502 with clear error; no canned plan |
 | NDMA guidance snapshot | Official preparedness bullets | Versioned static evidence |
 
@@ -85,6 +86,7 @@ Deterministic code owns: input validation, geocoding, weather fetch, source IDs,
 
 ```bash
 npm run selfcheck
+npm test
 ```
 
 Manual production smoke:
@@ -107,6 +109,4 @@ See [docs/ALIGNMENT.md](docs/ALIGNMENT.md).
 - Language is chosen before generation (no post-hoc silent translation).
 - Not a substitute for official emergency instructions.
 
-## Deployed URL
-
-_Set after `vercel --prod` deploy._
+Demo chips on the form only fill inputs — every plan still requires a live Gemini call.

@@ -130,13 +130,7 @@ export function sanitizePlanSourceIds(
   const clean = (ids: string[]) => ids.filter((id) => allowed.has(id));
   const fixAction = <T extends { sourceIds: string[] }>(a: T): T => ({
     ...a,
-    sourceIds: clean(a.sourceIds).length
-      ? clean(a.sourceIds)
-      : evidence.find((e) => e.kind === 'weather')
-        ? [evidence.find((e) => e.kind === 'weather')!.id]
-        : evidence[0]
-          ? [evidence[0].id]
-          : [],
+    sourceIds: clean(a.sourceIds),
   });
 
   return {

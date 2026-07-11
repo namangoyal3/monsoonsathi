@@ -42,6 +42,12 @@ interface FormState {
   support: Record<SupportKey, boolean>;
 }
 
+const emptySupport = () =>
+  Object.fromEntries(SUPPORT_NEEDS.map(([key]) => [key, false])) as Record<
+    SupportKey,
+    boolean
+  >;
+
 const INITIAL_FORM: FormState = {
   locality: 'Bengaluru',
   scope: 'individual',
@@ -52,11 +58,71 @@ const INITIAL_FORM: FormState = {
   householdSize: 3,
   communitySize: 20,
   additionalContext: '',
-  support: Object.fromEntries(SUPPORT_NEEDS.map(([key]) => [key, false])) as Record<
-    SupportKey,
-    boolean
-  >,
+  support: emptySupport(),
 };
+
+/** Demo chips only fill the form — they never inject canned AI results. */
+const DEMO_SCENARIOS: Array<{ id: string; label: string; hint: string; form: FormState }> = [
+  {
+    id: 'family-during',
+    label: 'Family · During · EN',
+    hint: 'Elderly + powered device',
+    form: {
+      ...INITIAL_FORM,
+      scope: 'family',
+      phase: 'during',
+      language: 'English',
+      transportMode: 'two_wheeler',
+      householdSize: 4,
+      support: {
+        ...emptySupport(),
+        hasElderly: true,
+        hasPoweredMedicalDevice: true,
+        needsEssentialMedicines: true,
+      },
+    },
+  },
+  {
+    id: 'community-kn',
+    label: 'Community · After · KN',
+    hint: 'Privacy-safe check-ins',
+    form: {
+      ...INITIAL_FORM,
+      scope: 'community',
+      phase: 'after',
+      language: 'Kannada',
+      communitySize: 80,
+      additionalContext: 'Elderly residents and powered-equipment users need check-ins',
+      support: emptySupport(),
+    },
+  },
+  {
+    id: 'individual-hi',
+    label: 'Individual · Before · HI',
+    hint: 'Hindi prep plan',
+    form: {
+      ...INITIAL_FORM,
+      scope: 'individual',
+      phase: 'before',
+      language: 'Hindi',
+      support: emptySupport(),
+    },
+  },
+  {
+    id: 'travel',
+    label: 'Travel stress · EN',
+    hint: 'Electronic City commute',
+    form: {
+      ...INITIAL_FORM,
+      scope: 'individual',
+      phase: 'during',
+      language: 'English',
+      transportMode: 'two_wheeler',
+      destination: 'Electronic City',
+      support: emptySupport(),
+    },
+  },
+];
 
 function formatTime(value: string): string {
   return new Intl.DateTimeFormat('en-IN', {
@@ -94,7 +160,14 @@ function ActionCard({ action, index }: { action: Action; index: number }) {
 }
 
 function WeatherIcon({ code }: { code: number }) {
-  const symbol = code >= 95 ? 'ϟ' : code >= 51 ? '☂' : code >= 2 ? '☁' : '☀';
+  const symbol =
+    code >= 200 && code < 300
+      ? 'ϟ'
+      : code >= 300 && code < 600
+        ? '☂'
+        : code >= 700 && code !== 800
+          ? '☁'
+          : '☀';
   return <span aria-hidden="true">{symbol}</span>;
 }
 
@@ -127,7 +200,11 @@ function PlanView({ result, onClear }: { result: PlanResponseSuccess; onClear: (
         </div>
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line px-5 py-3 text-xs text-ink-faint">
           <span>Observed {formatTime(result.weather.observedAt)} · refresh by {formatTime(result.validUntil)}</span>
-          <span className="tabular">Plan generated in {(result.timings.totalMs / 1000).toFixed(1)}s</span>
+          <span className="tabular">
+            Live GenAI · {result.timings.modelCalls} model call
+            {result.timings.modelCalls === 1 ? '' : 's'} ·{' '}
+            {(result.timings.totalMs / 1000).toFixed(1)}s
+          </span>
         </div>
       </section>
 
@@ -181,7 +258,8 @@ function PlanView({ result, onClear }: { result: PlanResponseSuccess; onClear: (
                   checked={isChecked}
                   onChange={() => setChecked((current) => {
                     const next = new Set(current);
-                    next.has(index) ? next.delete(index) : next.add(index);
+                    if (next.has(index)) next.delete(index);
+                    else next.add(index);
                     return next;
                   })}
                 />
@@ -200,12 +278,34 @@ function PlanView({ result, onClear }: { result: PlanResponseSuccess; onClear: (
           </div>
         </section>
         <section className="ms-card" aria-labelledby="phase-title">
-          <div className="section-heading"><div><p className="eyebrow text-leaf">Selected phase</p><h3 id="phase-title" className="capitalize">{result.profile.phase} the event</h3></div></div>
+          <div className="section-heading"><div><p className="eyebrow text-leaf">Selected phase · AI-generated</p><h3 id="phase-title" className="capitalize">{result.profile.phase} the event</h3></div></div>
           <div className="mt-3 divide-y divide-line">
             {result.plan.selectedPhase.map((action, index) => <ActionCard key={`${action.title}-${index}`} action={action} index={index} />)}
           </div>
         </section>
       </div>
+
+      <section className="ms-card" aria-labelledby="phases-title">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow text-leaf">AI-generated · all event stages</p>
+            <h3 id="phases-title">Before / During / After</h3>
+          </div>
+          <span className="ms-badge bg-leaf-soft text-leaf">GenAI guidance</span>
+        </div>
+        <dl className="mt-3 grid gap-3 sm:grid-cols-3">
+          {([
+            ['Before', result.plan.otherPhaseSummaries.before],
+            ['During', result.plan.otherPhaseSummaries.during],
+            ['After', result.plan.otherPhaseSummaries.after],
+          ] as const).map(([label, text]) => (
+            <div key={label} className="rounded-xl border border-line bg-parchment/40 px-3 py-3">
+              <dt className="text-sm font-semibold text-ink">{label}</dt>
+              <dd className="mt-1 text-sm leading-6 text-ink-soft">{text}</dd>
+            </div>
+          ))}
+        </dl>
+      </section>
 
       {result.plan.supportActions.length > 0 && (
         <section className="ms-card" aria-labelledby="support-title">
@@ -329,6 +429,27 @@ export default function Home() {
                 <p className="step-label">Plan setup</p>
                 <h2 className="font-display text-2xl font-semibold">Tell us about today</h2>
                 <p className="mt-1 text-sm leading-5 text-ink-soft">Only what changes your safety priorities.</p>
+              </div>
+
+              <div className="mb-5" role="group" aria-label="Demo scenarios">
+                <p className="ms-label">Quick demos (fill form only — real Gemini call on submit)</p>
+                <div className="flex flex-wrap gap-2">
+                  {DEMO_SCENARIOS.map((scenario) => (
+                    <button
+                      key={scenario.id}
+                      type="button"
+                      className="ms-btn-ghost text-left !px-2.5 !py-1.5 !text-xs"
+                      onClick={() => {
+                        setForm(scenario.form);
+                        setError('');
+                        setResult(null);
+                      }}
+                      title={scenario.hint}
+                    >
+                      {scenario.label}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <fieldset>

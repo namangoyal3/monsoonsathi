@@ -4,16 +4,22 @@ import { buildTravelEvidence, fetchLiveWeather } from '@/lib/weather';
 import { getNdmaGuidanceEvidence } from '@/lib/ndma-guidance';
 import { generateMonsoonPlan } from '@/lib/gemini';
 import { toPublicError, AppError } from '@/lib/errors';
+import { checkRateLimit, clientIpFromRequest } from '@/lib/rateLimit';
 import type { PlanResponse, Profile } from '@/types/contract';
 
 export const maxDuration = 60;
 
-function json(body: PlanResponse, status = 200): Response {
+function json(
+  body: PlanResponse,
+  status = 200,
+  extraHeaders?: Record<string, string>
+): Response {
   return Response.json(body, {
     status,
     headers: {
       'Cache-Control': 'no-store',
       'X-Content-Type-Options': 'nosniff',
+      ...extraHeaders,
     },
   });
 }
@@ -23,6 +29,20 @@ export async function POST(request: Request): Promise<Response> {
   const requestId = `ms-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
   try {
+    const ip = clientIpFromRequest(request);
+    const rl = checkRateLimit(`plan:${ip}`, 8, 60_000);
+    if (!rl.ok) {
+      return json(
+        {
+          ok: false,
+          error: 'Too many plan requests. Please wait a moment and try again.',
+          code: 'RATE_LIMITED',
+        },
+        429,
+        { 'Retry-After': String(rl.retryAfterSec) }
+      );
+    }
+
     // Bound body size (~32kb)
     const rawText = await request.text();
     if (rawText.length > 32_000) {
@@ -72,13 +92,21 @@ export async function POST(request: Request): Promise<Response> {
       if (travelEv) evidence.push(travelEv);
     }
 
-    // 3) One Gemini call
-    const { plan, geminiMs } = await generateMonsoonPlan(
+    // 3) Real Gemini generation only — no hardcoded plan content
+    const { plan, geminiMs, modelCalls } = await generateMonsoonPlan(
       profile,
       evidence,
       weatherBundle.alertState,
       weatherBundle.alertSummary
     );
+
+    if (modelCalls < 1) {
+      throw new AppError(
+        'GEMINI_REQUIRED',
+        'A live GenAI call is required; no hardcoded plan is allowed.',
+        500
+      );
+    }
 
     const generatedAt = new Date().toISOString();
     const validUntil = new Date(Date.now() + 30 * 60_000).toISOString();
@@ -104,6 +132,7 @@ export async function POST(request: Request): Promise<Response> {
         weatherMs: weatherBundle.weatherMs,
         geminiMs,
         totalMs: Date.now() - started,
+        modelCalls,
       },
     });
   } catch (err) {
