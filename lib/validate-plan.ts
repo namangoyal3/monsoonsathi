@@ -96,9 +96,7 @@ export function validatePlanSemantics(
   }
 
   if (plan.travel) {
-    if (plan.travel.recommendation === 'go') {
-      reasons.push('travel_recommendation_go_not_supported');
-    }
+    // Affirmative "go" is excluded at schema/coerce layer; keep phrase safety checks.
     if (!plan.travel.sourceIds.some((id) => byId.get(id)?.kind === 'route')) {
       reasons.push('travel_without_route_evidence');
     }

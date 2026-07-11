@@ -46,7 +46,25 @@ export async function geocodeLocality(
     );
   }
 
-  const data = (await res.json()) as Array<{
+  let payload: unknown;
+  try {
+    payload = await res.json();
+  } catch {
+    throw new AppError(
+      'GEOCODE_FAILED',
+      'Location lookup returned an invalid response. Please retry.',
+      502
+    );
+  }
+  if (!Array.isArray(payload)) {
+    throw new AppError(
+      'GEOCODE_FAILED',
+      'Location lookup returned an invalid response. Please retry.',
+      502
+    );
+  }
+
+  const data = payload as Array<{
     name: string;
     state?: string;
     country?: string;

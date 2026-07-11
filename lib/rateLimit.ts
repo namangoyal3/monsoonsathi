@@ -1,4 +1,4 @@
-/** Simple per-instance sliding window rate limiter (serverless-friendly secondary guard). */
+/** Simple per-instance fixed-window rate limiter (serverless-friendly secondary guard). */
 
 type Bucket = { count: number; resetAt: number };
 
@@ -46,12 +46,12 @@ export function checkRateLimit(
     };
   }
 
-  existing.count += 1;
-  buckets.set(key, existing);
+  const next: Bucket = { count: existing.count + 1, resetAt: existing.resetAt };
+  buckets.set(key, next);
   return {
     ok: true,
-    remaining: Math.max(0, limit - existing.count),
-    resetAt: existing.resetAt,
+    remaining: Math.max(0, limit - next.count),
+    resetAt: next.resetAt,
   };
 }
 

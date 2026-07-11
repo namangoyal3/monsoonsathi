@@ -135,7 +135,17 @@ async function fetchJson<T>(url: URL, signal?: AbortSignal): Promise<T> {
       502
     );
   }
-  return (await response.json()) as T;
+  try {
+    const data: unknown = await response.json();
+    if (!data || typeof data !== 'object') throw new TypeError('Invalid JSON shape');
+    return data as T;
+  } catch {
+    throw new AppError(
+      'WEATHER_FAILED',
+      'Live weather returned an invalid response. Try again shortly.',
+      502
+    );
+  }
 }
 
 /** Best-effort official/publisher alerts via OpenWeather One Call (may be unavailable on free keys). */

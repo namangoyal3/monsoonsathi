@@ -73,7 +73,7 @@ export const GeneratedPlanSchema = z
     supportActions: z.array(ActionSchema).max(4),
     travel: z
       .object({
-        recommendation: z.enum(['go', 'delay', 'reconsider', 'insufficient_data']),
+        recommendation: z.enum(['delay', 'reconsider', 'insufficient_data']),
         reason: z.string().min(1).max(400),
         cautions: z.array(z.string().min(1).max(200)).max(3),
         sourceIds: z.array(z.string().min(1).max(40)).max(8),

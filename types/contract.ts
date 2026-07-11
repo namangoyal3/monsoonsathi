@@ -22,8 +22,11 @@ export type ActionBasis =
   | 'profile'
   | 'official_guidance';
 export type ActionState = 'prepare' | 'monitor' | 'act' | 'recover';
+/**
+ * Travel advice never includes affirmative "go" clearance.
+ * Live weather/route data cannot prove roads are open or flood-safe.
+ */
 export type TravelRecommendation =
-  | 'go'
   | 'delay'
   | 'reconsider'
   | 'insufficient_data';

@@ -1,6 +1,6 @@
-import { getGeminiApiKey, getGeminiModel } from '@/lib/env';
 import { AppError } from '@/lib/errors';
-import { GeneratedPlanSchema } from '@/lib/schema';
+import { parsePlan } from '@/lib/coerce-plan';
+import { geminiComplete } from '@/lib/gemini-client';
 import {
   buildRepairPrompt,
   buildSystemPrompt,
@@ -9,293 +9,11 @@ import {
 import { validatePlanSemantics } from '@/lib/validate-plan';
 import type { Evidence, GeneratedPlan, Profile } from '@/types/contract';
 
-/**
- * Compact Gemini response schema (hand-written).
- * Avoids Zod→JSONSchema state explosions; server still Zod-validates after generation.
- * No min/max item counts here — those are enforced post-parse.
- */
-const GEMINI_RESPONSE_SCHEMA = {
-  type: 'object',
-  properties: {
-    actionState: {
-      type: 'string',
-      enum: ['prepare', 'monitor', 'act', 'recover'],
-    },
-    interpretation: { type: 'string' },
-    whyPrioritized: { type: 'string' },
-    doNow: { type: 'array', items: { $ref: '#/$defs/action' } },
-    doNext: { type: 'array', items: { $ref: '#/$defs/action' } },
-    checklist: { type: 'array', items: { $ref: '#/$defs/action' } },
-    selectedPhase: { type: 'array', items: { $ref: '#/$defs/action' } },
-    supportActions: { type: 'array', items: { $ref: '#/$defs/action' } },
-    travel: {
-      anyOf: [
-        { type: 'null' },
-        {
-          type: 'object',
-          properties: {
-            recommendation: {
-              type: 'string',
-              enum: ['delay', 'reconsider', 'insufficient_data'],
-            },
-            reason: { type: 'string' },
-            cautions: { type: 'array', items: { type: 'string' } },
-            sourceIds: { type: 'array', items: { type: 'string' } },
-          },
-          required: ['recommendation', 'reason', 'cautions', 'sourceIds'],
-        },
-      ],
-    },
-    otherPhaseSummaries: {
-      type: 'object',
-      properties: {
-        before: { type: 'string' },
-        during: { type: 'string' },
-        after: { type: 'string' },
-      },
-      required: ['before', 'during', 'after'],
-    },
-    assumptions: { type: 'array', items: { type: 'string' } },
-    limitations: { type: 'array', items: { type: 'string' } },
-  },
-  required: [
-    'actionState',
-    'interpretation',
-    'whyPrioritized',
-    'doNow',
-    'doNext',
-    'checklist',
-    'selectedPhase',
-    'supportActions',
-    'travel',
-    'otherPhaseSummaries',
-    'assumptions',
-    'limitations',
-  ],
-  $defs: {
-    action: {
-      type: 'object',
-      properties: {
-        priority: { type: 'string', enum: ['critical', 'high', 'normal'] },
-        title: { type: 'string' },
-        instruction: { type: 'string' },
-        reason: { type: 'string' },
-        appliesTo: { type: 'string' },
-        timeframe: {
-          type: 'string',
-          enum: ['now', 'next_hour', 'today', 'before_travel', 'after_event'],
-        },
-        basis: {
-          type: 'string',
-          enum: [
-            'official_alert',
-            'weather',
-            'route',
-            'profile',
-            'official_guidance',
-          ],
-        },
-        sourceIds: { type: 'array', items: { type: 'string' } },
-      },
-      required: [
-        'priority',
-        'title',
-        'instruction',
-        'reason',
-        'appliesTo',
-        'timeframe',
-        'basis',
-        'sourceIds',
-      ],
-    },
-  },
-} as const;
-
-export function extractJson(text: string): string {
-  const stripped = text.replace(/```(?:json)?/gi, '').trim();
-  const start = stripped.indexOf('{');
-  const end = stripped.lastIndexOf('}');
-  if (start === -1 || end === -1 || end <= start) return stripped;
-  return stripped.slice(start, end + 1);
-}
+// Re-export pure helpers so existing tests keep importing from @/lib/gemini
+export { coercePlanShape, extractJson, parsePlan } from '@/lib/coerce-plan';
 
 /**
- * Normalize model enum/string drift only.
- * Does NOT invent user-facing plan content, checklist items, or phase summaries.
- * Missing GenAI content fails validation so we re-call the model.
- */
-export function coercePlanShape(input: unknown): unknown {
-  if (!input || typeof input !== 'object') return input;
-  const root = { ...(input as Record<string, unknown>) };
-
-  const mapPriority = (v: unknown): string => {
-    const s = String(v ?? '').toLowerCase().trim();
-    if (['critical', 'urgent', 'emergency'].includes(s)) return 'critical';
-    if (['high', 'medium-high', 'important'].includes(s)) return 'high';
-    if (['medium', 'moderate', 'low', 'normal'].includes(s)) return 'normal';
-    return s;
-  };
-
-  const mapTimeframe = (v: unknown): string => {
-    const s = String(v ?? '').toLowerCase().trim().replace(/\s+/g, '_');
-    if (['now', 'immediate', 'asap'].includes(s)) return 'now';
-    if (['next_hour', 'next-hour', 'within_hour', '1h'].includes(s)) return 'next_hour';
-    if (['today', 'this_day', 'same_day'].includes(s)) return 'today';
-    if (['before_travel', 'pre_travel', 'travel'].includes(s)) return 'before_travel';
-    if (['after_event', 'after', 'recovery', 'post'].includes(s)) return 'after_event';
-    return s;
-  };
-
-  const mapBasis = (v: unknown): string => {
-    const s = String(v ?? '').toLowerCase().trim();
-    if (s.includes('alert')) return 'official_alert';
-    if (s.includes('route') || s.includes('travel')) return 'route';
-    if (s.includes('profile') || s.includes('household') || s.includes('family'))
-      return 'profile';
-    if (s.includes('guidance') || s.includes('ndma') || s.includes('official'))
-      return 'official_guidance';
-    if (s.includes('weather')) return 'weather';
-    return s;
-  };
-
-  const mapActionState = (v: unknown): string => {
-    const s = String(v ?? '').toLowerCase().trim();
-    if (['prepare', 'preparing', 'prep'].includes(s)) return 'prepare';
-    if (['monitor', 'monitoring', 'watch'].includes(s)) return 'monitor';
-    if (['act', 'action', 'take_action', 'respond'].includes(s)) return 'act';
-    if (['recover', 'recovery'].includes(s)) return 'recover';
-    return s;
-  };
-
-  const mapTravelRec = (v: unknown): string => {
-    const s = String(v ?? '').toLowerCase().trim().replace(/\s+/g, '_');
-    if (['go', 'proceed', 'proceed_with_caution', 'ok'].includes(s)) return 'go';
-    if (['delay', 'delay_if_possible', 'wait'].includes(s)) return 'delay';
-    if (
-      ['reconsider', 'avoid', 'avoid_non_essential_travel', 'dont_go', "don't_go"].includes(
-        s
-      )
-    )
-      return 'reconsider';
-    if (['insufficient_data', 'unknown', 'unclear'].includes(s))
-      return 'insufficient_data';
-    return s;
-  };
-
-  const fixAction = (a: unknown): unknown | null => {
-    if (!a || typeof a !== 'object') return null;
-    const o = { ...(a as Record<string, unknown>) };
-    // Require model-provided title + instruction — do not invent content
-    if (!o.title || !String(o.title).trim()) return null;
-    if (!o.instruction || !String(o.instruction).trim()) return null;
-    o.priority = mapPriority(o.priority);
-    o.timeframe = mapTimeframe(o.timeframe);
-    o.basis = mapBasis(o.basis);
-    o.title = String(o.title).slice(0, 100);
-    o.instruction = String(o.instruction).slice(0, 350);
-    if (typeof o.reason === 'string') o.reason = o.reason.slice(0, 300);
-    if (typeof o.appliesTo === 'string') o.appliesTo = o.appliesTo.slice(0, 80);
-    o.sourceIds = Array.isArray(o.sourceIds)
-      ? (o.sourceIds as unknown[]).map(String).filter(Boolean).slice(0, 8)
-      : [];
-    return o;
-  };
-
-  const fixArr = (key: string, max: number) => {
-    const arr = Array.isArray(root[key]) ? (root[key] as unknown[]) : [];
-    root[key] = arr.map(fixAction).filter(Boolean).slice(0, max);
-  };
-
-  if (root.actionState !== undefined) {
-    root.actionState = mapActionState(root.actionState);
-  }
-  if (typeof root.interpretation === 'string') {
-    root.interpretation = root.interpretation.slice(0, 800);
-  }
-  if (typeof root.whyPrioritized === 'string') {
-    root.whyPrioritized = root.whyPrioritized.slice(0, 500);
-  }
-
-  fixArr('doNow', 3);
-  fixArr('doNext', 4);
-  fixArr('checklist', 6);
-  fixArr('selectedPhase', 3);
-  fixArr('supportActions', 4);
-
-  if (root.travel && typeof root.travel === 'object') {
-    const t = { ...(root.travel as Record<string, unknown>) };
-    t.recommendation = mapTravelRec(t.recommendation);
-    if (typeof t.reason === 'string') t.reason = t.reason.slice(0, 400);
-    t.cautions = Array.isArray(t.cautions)
-      ? (t.cautions as unknown[]).map((c) => String(c).slice(0, 200)).slice(0, 3)
-      : [];
-    t.sourceIds = Array.isArray(t.sourceIds)
-      ? (t.sourceIds as unknown[]).map(String).filter(Boolean).slice(0, 8)
-      : [];
-    root.travel = t;
-  }
-
-  if (root.otherPhaseSummaries && typeof root.otherPhaseSummaries === 'object') {
-    const o = root.otherPhaseSummaries as Record<string, unknown>;
-    root.otherPhaseSummaries = {
-      before: typeof o.before === 'string' ? o.before.slice(0, 300) : o.before,
-      during: typeof o.during === 'string' ? o.during.slice(0, 300) : o.during,
-      after: typeof o.after === 'string' ? o.after.slice(0, 300) : o.after,
-    };
-  }
-
-  if (Array.isArray(root.assumptions)) {
-    root.assumptions = (root.assumptions as unknown[])
-      .map((a) => String(a).slice(0, 200))
-      .slice(0, 3);
-  }
-  if (Array.isArray(root.limitations)) {
-    root.limitations = (root.limitations as unknown[])
-      .map((a) => String(a).slice(0, 200))
-      .slice(0, 3);
-  }
-
-  return root;
-}
-
-function parsePlan(raw: string): GeneratedPlan {
-  let obj: unknown;
-  try {
-    obj = JSON.parse(extractJson(raw));
-  } catch (e) {
-    console.error(
-      JSON.stringify({
-        code: 'GEMINI_INVALID_JSON_DETAIL',
-        outputLength: raw.length,
-        errorName: e instanceof Error ? e.name : 'UnknownError',
-      })
-    );
-    throw new AppError(
-      'GEMINI_INVALID_JSON',
-      `Model returned invalid JSON: ${e instanceof Error ? e.message : String(e)}`,
-      502
-    );
-  }
-
-  obj = coercePlanShape(obj);
-  const result = GeneratedPlanSchema.safeParse(obj);
-  if (!result.success) {
-    const issues = result.error.issues
-      .slice(0, 8)
-      .map((i) => `${i.path.join('.')}: ${i.message}`)
-      .join('; ');
-    console.error(JSON.stringify({ code: 'GEMINI_SCHEMA_DETAIL', issues }));
-    throw new AppError(
-      'GEMINI_SCHEMA',
-      `Model output failed schema validation: ${issues}`,
-      502
-    );
-  }
-  return result.data;
-}
-
-/**
- * Extra GenAI completeness checks — fails closed instead of injecting hardcoded actions.
+ * Completeness checks — fail closed; never inject hardcoded actions.
  */
 export function assertGenAiCompleteness(
   plan: GeneratedPlan,
@@ -385,127 +103,6 @@ export function assertGenAiCompleteness(
   }
 }
 
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-
-async function geminiComplete(
-  system: string,
-  user: string,
-  signal: AbortSignal,
-  onCall: () => void,
-  useSchema = true,
-  transientRetried = false
-): Promise<string> {
-  const key = getGeminiApiKey();
-  const model = getGeminiModel();
-  const generationConfig: Record<string, unknown> = {
-    responseMimeType: 'application/json',
-    maxOutputTokens: 8192,
-    temperature: 0.3,
-  };
-  if (useSchema) {
-    generationConfig.responseJsonSchema = GEMINI_RESPONSE_SCHEMA;
-  }
-
-  onCall();
-  let res: Response;
-  try {
-    res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': key,
-        },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: system }] },
-          contents: [{ role: 'user', parts: [{ text: user }] }],
-          generationConfig,
-        }),
-        signal,
-      }
-    );
-  } catch (error) {
-    const aborted =
-      signal.aborted ||
-      (error instanceof Error && error.name === 'AbortError');
-    console.error(
-      JSON.stringify({
-        code: 'GEMINI_FETCH_FAILED',
-        errorName: error instanceof Error ? error.name : 'UnknownError',
-      })
-    );
-    // One bounded retry on a transient network failure — still a real Gemini call.
-    if (!aborted && !transientRetried) {
-      await sleep(1200);
-      return geminiComplete(system, user, signal, onCall, useSchema, true);
-    }
-    throw new AppError(
-      'GEMINI_UNAVAILABLE',
-      'The AI service did not respond in time. Please try again.',
-      503
-    );
-  }
-
-  if (!res.ok) {
-    console.error(
-      JSON.stringify({
-        code: 'GEMINI_HTTP_DETAIL',
-        status: res.status,
-      })
-    );
-    // Schema too heavy or rejected → retry without JSON schema (still real Gemini)
-    if (useSchema && res.status === 400) {
-      return geminiComplete(system, user, signal, onCall, false, transientRetried);
-    }
-    // One bounded retry on a transient upstream failure (quota burst / 5xx) —
-    // still a real Gemini call, never a mock.
-    if (
-      !transientRetried &&
-      !signal.aborted &&
-      (res.status === 429 || res.status >= 500)
-    ) {
-      await sleep(res.status === 429 ? 2500 : 1200);
-      return geminiComplete(system, user, signal, onCall, useSchema, true);
-    }
-    throw new AppError(
-      'GEMINI_HTTP',
-      res.status === 429
-        ? 'The AI service is busy. Please wait a moment and try again.'
-        : 'The AI service could not create a plan. Please try again.',
-      res.status === 429 ? 503 : 502
-    );
-  }
-
-  const data = (await res.json()) as {
-    candidates?: {
-      content?: { parts?: { text?: string }[] };
-      finishReason?: string;
-    }[];
-    promptFeedback?: { blockReason?: string };
-  };
-
-  if (data.promptFeedback?.blockReason) {
-    throw new AppError(
-      'GEMINI_BLOCKED',
-      'The AI service could not safely process that request. Try removing sensitive or instruction-like text.',
-      502
-    );
-  }
-
-  const text =
-    data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ??
-    '';
-  if (!text.trim()) {
-    // Truncation / empty with schema → retry without schema once
-    if (useSchema) {
-      return geminiComplete(system, user, signal, onCall, false, transientRetried);
-    }
-    throw new AppError('GEMINI_EMPTY', 'Gemini returned an empty response.', 502);
-  }
-  return text;
-}
-
 export interface GeneratePlanResult {
   plan: GeneratedPlan;
   geminiMs: number;
@@ -513,10 +110,8 @@ export interface GeneratePlanResult {
 }
 
 /**
- * GenAI plan generation pipeline.
- * - Always requires a real Gemini response
- * - Never injects hardcoded checklist/actions/travel text
- * - On incomplete/invalid model output: one real GenAI repair call, then fail honestly
+ * Orchestrates live Gemini generation + validation.
+ * Single responsibility: one plan attempt, one optional repair attempt.
  */
 export async function generateMonsoonPlan(
   profile: Profile,
@@ -530,8 +125,15 @@ export async function generateMonsoonPlan(
   let modelCalls = 0;
 
   const runOnce = async (user: string): Promise<GeneratedPlan> => {
-    const raw = await geminiComplete(system, user, signal, () => modelCalls++);
-    const plan = parsePlan(raw);
+    const raw = await geminiComplete(system, user, signal, () => {
+      modelCalls += 1;
+    });
+    let plan = parsePlan(raw);
+
+    if (!profile.destination?.trim()) {
+      plan = { ...plan, travel: null };
+    }
+
     assertGenAiCompleteness(plan, profile);
 
     const semantic = validatePlanSemantics(plan, evidence, {
@@ -570,10 +172,8 @@ export async function generateMonsoonPlan(
       throw first;
     }
 
-    const reason = first.code;
-    console.error(JSON.stringify({ code: 'GEMINI_REPAIR', reason }));
+    console.error(JSON.stringify({ code: 'GEMINI_REPAIR', reason: first.code }));
 
-    // One more real Gemini call — still no hardcoded plan content
     try {
       const plan = await runOnce(
         buildRepairPrompt(
@@ -581,7 +181,7 @@ export async function generateMonsoonPlan(
           evidence,
           alertState,
           alertSummary,
-          reason,
+          first.code,
           ''
         )
       );

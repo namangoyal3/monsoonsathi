@@ -134,6 +134,31 @@ describe('coercePlanShape', () => {
     }) as Record<string, unknown>;
     expect(coerced.doNow).toEqual([]);
   });
+
+  it('maps affirmative travel go/proceed to delay (never road clearance)', () => {
+    const coerced = coercePlanShape({
+      travel: {
+        recommendation: 'go',
+        reason: 'Looks fine.',
+        cautions: [],
+        sourceIds: ['r-1'],
+      },
+    }) as Record<string, unknown>;
+    const travel = coerced.travel as Record<string, string>;
+    expect(travel.recommendation).toBe('delay');
+
+    const proceed = coercePlanShape({
+      travel: {
+        recommendation: 'proceed_with_caution',
+        reason: 'Maybe ok.',
+        cautions: [],
+        sourceIds: ['r-1'],
+      },
+    }) as Record<string, unknown>;
+    expect((proceed.travel as Record<string, string>).recommendation).toBe(
+      'delay'
+    );
+  });
 });
 
 describe('Gemini transient retry', () => {
@@ -189,7 +214,7 @@ describe('validatePlanSemantics', () => {
   it('rejects flood-safe travel claims', () => {
     const plan = samplePlan({
       travel: {
-        recommendation: 'go',
+        recommendation: 'delay',
         reason: 'Route is flood-safe and guaranteed safe.',
         cautions: ['Road is open'],
         sourceIds: ['w-current-1'],
@@ -205,6 +230,19 @@ describe('validatePlanSemantics', () => {
         (r) => r.includes('route_safety') || r.includes('unsupported')
       )
     ).toBe(true);
+  });
+
+  it('rejects travel recommendation go at the Zod schema boundary', () => {
+    const plan = samplePlan({
+      travel: {
+        // Bypass TypeScript — models can still emit invalid enums
+        recommendation: 'go' as unknown as 'delay',
+        reason: 'Conditions look manageable.',
+        cautions: [],
+        sourceIds: ['r-1'],
+      },
+    });
+    expect(GeneratedPlanSchema.safeParse(plan).success).toBe(false);
   });
 
   it('rejects phone numbers in model output', () => {
@@ -239,15 +277,15 @@ describe('validatePlanSemantics', () => {
     expect(result.reasons).toContain('unknown_source_id:fake-99');
   });
 
-  it('rejects unprovable travel approval even without a flood-safe phrase', () => {
+  it('accepts delay travel when route evidence is present and phrasing is safe', () => {
     const routeEvidence: Evidence[] = [
       ...evidence,
       { id: 'r-1', kind: 'route', text: 'Distance only', publisher: 'OSRM' },
     ];
     const plan = samplePlan({
       travel: {
-        recommendation: 'go',
-        reason: 'Conditions look manageable; proceed with caution.',
+        recommendation: 'delay',
+        reason: 'Heavy rain forecast; delay non-essential travel if possible.',
         cautions: ['Avoid flooded stretches if conditions change'],
         sourceIds: ['r-1'],
       },
@@ -256,8 +294,7 @@ describe('validatePlanSemantics', () => {
       hasDestination: true,
       alertState: 'unavailable',
     });
-    expect(result.ok).toBe(false);
-    expect(result.reasons).toContain('travel_recommendation_go_not_supported');
+    expect(result.ok).toBe(true);
   });
 
   it('rejects flood-safe travel claims in supported languages', () => {
@@ -267,7 +304,7 @@ describe('validatePlanSemantics', () => {
     ];
     const plan = samplePlan({
       travel: {
-        recommendation: 'go',
+        recommendation: 'reconsider',
         reason: 'मार्ग सुरक्षित',
         cautions: [],
         sourceIds: ['r-1'],
