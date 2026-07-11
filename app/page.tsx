@@ -529,7 +529,10 @@ export default function Home() {
         </div>
       </main>
 
-      <footer className="border-t border-line bg-white/60 px-4 py-5 text-center text-xs text-ink-faint">MonsoonSathi · Built for preparedness, not prediction · Follow IMD, NDMA and local authority instructions</footer>
+      <footer className="border-t border-line bg-white/60 px-4 py-5 text-center text-xs text-ink-faint">
+        MonsoonSathi · Live weather via OpenWeather · Personalized plans via Gemini · No hardcoded AI
+        results · Follow IMD, NDMA and local authority instructions
+      </footer>
     </>
   );
 }

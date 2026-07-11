@@ -33,15 +33,19 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:3000](http://localhost:3000) (or the port Next prints).
 
 ### Environment
 
+Copy `.env.example` → `.env.local` (and optionally `.env`). **Never commit real keys** (`.env*` is gitignored).
+
 | Variable | Required | Notes |
 |---|---|---|
-| `GEMINI_API_KEY` | yes | Server-only |
-| `GEMINI_MODEL` | no | Default `gemini-flash-lite-latest` |
-| `OPENWEATHER_API_KEY` | yes | Server-only live weather |
+| `GEMINI_API_KEY` | yes | Server-only GenAI key |
+| `GEMINI_MODEL` | no | Default in code if unset (e.g. `gemini-2.5-flash` / `gemini-flash-lite-latest`) |
+| `OPENWEATHER_API_KEY` | yes | Server-only live weather + geocoding |
+
+Both keys are read only in server code via `lib/env.ts` — never `NEXT_PUBLIC_*`.
 
 ## Scripts
 
@@ -110,3 +114,30 @@ See [docs/ALIGNMENT.md](docs/ALIGNMENT.md).
 - Not a substitute for official emergency instructions.
 
 Demo chips on the form only fill inputs — every plan still requires a live Gemini call.
+
+## Deployed URL
+
+**Production:** https://monsoonsathi.vercel.app
+
+### Production smoke (measured)
+
+| Scenario | Result |
+|---|---|
+| Family during + elderly/device | OpenWeather live, Gemini `modelCalls: 1`, personalized support |
+| Hindi individual | Non-English GenAI plan |
+| Travel to Electronic City | Travel advisory from Gemini |
+| Invalid locality | Honest `LOCATION_NOT_FOUND` (no fake plan) |
+
+### Judge demo (3 min)
+
+1. Open https://monsoonsathi.vercel.app  
+2. Click **Family · During · EN** → Create plan  
+3. Show live OpenWeather timestamp + GenAI model-call badge  
+4. Show support actions for elderly/device  
+5. Click **Individual · Before · HI** → Hindi plan  
+6. Optional: **Travel stress** chip → travel disclaimer (never flood-safe)
+
+### 60s pitch
+
+> MonsoonSathi turns live OpenWeather data into personalized monsoon actions with one Gemini call—individuals, families, and communities; before, during, and after; English, Hindi, and Kannada—with server-side safety validation and zero hardcoded AI results.
+
