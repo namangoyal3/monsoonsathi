@@ -169,5 +169,34 @@ Requirements for THIS response:
 6. If DESTINATION_PROVIDED is no, travel must be null.
 7. otherPhaseSummaries must include before, during, and after — each specific, not empty placeholders.
 8. limitations must mention uncertainty / official-channel limits honestly.
-9. JSON only.`;
+9. checklist MUST contain at least 4 distinct items.
+10. If SCOPE is community, supportActions MUST contain at least 2 privacy-safe community actions.
+11. If DESTINATION_PROVIDED is yes, travel MUST be a non-null object with recommendation + reason + cautions.
+12. JSON only.`;
+}
+
+/** Second real Gemini call when the first output fails validation — still no hardcoded plan. */
+export function buildRepairPrompt(
+  profile: Profile,
+  evidence: Evidence[],
+  alertState: string,
+  alertSummary: string,
+  failureReason: string,
+  previousRaw: string
+): string {
+  return `${buildUserPrompt(profile, evidence, alertState, alertSummary)}
+
+PREVIOUS_OUTPUT_FAILED validation:
+${failureReason}
+
+${previousRaw ? `Broken output (do not copy invalid parts):\n${previousRaw.slice(0, 3000)}\n` : ''}
+
+Regenerate a COMPLETE valid JSON plan only. Required:
+- checklist length >= 4
+- doNow and doNext non-empty
+- supportActions if family/community/vulnerable needs
+- travel object if destination provided (never flood-safe)
+- all three otherPhaseSummaries
+- language: ${profile.language}
+No markdown.`;
 }

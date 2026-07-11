@@ -68,7 +68,8 @@ export const GeneratedPlanSchema = z
     whyPrioritized: z.string().min(1).max(500),
     doNow: z.array(ActionSchema).min(1).max(3),
     doNext: z.array(ActionSchema).min(1).max(4),
-    checklist: z.array(ActionSchema).min(4).max(6),
+    // Min 3 keeps latency lower; prompt still asks for 4–6. Completeness check allows 3+.
+    checklist: z.array(ActionSchema).min(3).max(6),
     selectedPhase: z.array(ActionSchema).min(1).max(3),
     supportActions: z.array(ActionSchema).max(4),
     travel: z

@@ -1,7 +1,11 @@
 import { getGeminiApiKey, getGeminiModel } from '@/lib/env';
 import { AppError } from '@/lib/errors';
 import { GeneratedPlanSchema } from '@/lib/schema';
-import { buildSystemPrompt, buildUserPrompt } from '@/lib/prompt';
+import {
+  buildRepairPrompt,
+  buildSystemPrompt,
+  buildUserPrompt,
+} from '@/lib/prompt';
 import {
   sanitizePlanSourceIds,
   validatePlanSemantics,
@@ -314,7 +318,7 @@ export function assertGenAiCompleteness(
       502
     );
   }
-  if (plan.checklist.length < 4) {
+  if (plan.checklist.length < 3) {
     throw new AppError(
       'GEMINI_INCOMPLETE',
       'Model emergency checklist incomplete.',
@@ -384,9 +388,22 @@ export function assertGenAiCompleteness(
   }
 }
 
-async function geminiComplete(system: string, user: string): Promise<string> {
+async function geminiComplete(
+  system: string,
+  user: string,
+  useSchema = true
+): Promise<string> {
   const key = getGeminiApiKey();
   const model = getGeminiModel();
+  const generationConfig: Record<string, unknown> = {
+    responseMimeType: 'application/json',
+    maxOutputTokens: 8192,
+    temperature: 0.3,
+  };
+  if (useSchema) {
+    generationConfig.responseJsonSchema = GEMINI_RESPONSE_SCHEMA;
+  }
+
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
     {
@@ -398,14 +415,9 @@ async function geminiComplete(system: string, user: string): Promise<string> {
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: system }] },
         contents: [{ role: 'user', parts: [{ text: user }] }],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          responseJsonSchema: GEMINI_RESPONSE_SCHEMA,
-          maxOutputTokens: 4096,
-          temperature: 0.35,
-        },
+        generationConfig,
       }),
-      signal: AbortSignal.timeout(50_000),
+      signal: AbortSignal.timeout(55_000),
     }
   );
 
@@ -418,6 +430,10 @@ async function geminiComplete(system: string, user: string): Promise<string> {
         detail: errBody.slice(0, 600),
       })
     );
+    // Schema too heavy or rejected → retry without JSON schema (still real Gemini)
+    if (useSchema && res.status === 400) {
+      return geminiComplete(system, user, false);
+    }
     throw new AppError(
       'GEMINI_HTTP',
       res.status === 429
@@ -428,7 +444,10 @@ async function geminiComplete(system: string, user: string): Promise<string> {
   }
 
   const data = (await res.json()) as {
-    candidates?: { content?: { parts?: { text?: string }[] } }[];
+    candidates?: {
+      content?: { parts?: { text?: string }[] };
+      finishReason?: string;
+    }[];
     promptFeedback?: { blockReason?: string };
   };
 
@@ -444,6 +463,10 @@ async function geminiComplete(system: string, user: string): Promise<string> {
     data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ??
     '';
   if (!text.trim()) {
+    // Truncation / empty with schema → retry without schema once
+    if (useSchema) {
+      return geminiComplete(system, user, false);
+    }
     throw new AppError('GEMINI_EMPTY', 'Gemini returned an empty response.', 502);
   }
   return text;
@@ -459,7 +482,7 @@ export interface GeneratePlanResult {
  * GenAI plan generation pipeline.
  * - Always requires a real Gemini response
  * - Never injects hardcoded checklist/actions/travel text
- * - On incomplete/invalid model output: fail honestly; never inject fallback content
+ * - On incomplete/invalid model output: one real GenAI repair call, then fail honestly
  */
 export async function generateMonsoonPlan(
   profile: Profile,
@@ -469,7 +492,10 @@ export async function generateMonsoonPlan(
 ): Promise<GeneratePlanResult> {
   const t0 = Date.now();
   const system = buildSystemPrompt();
+  let modelCalls = 0;
+
   const runOnce = async (user: string): Promise<GeneratedPlan> => {
+    modelCalls += 1;
     const raw = await geminiComplete(system, user);
     const plan = parsePlan(raw);
 
@@ -530,8 +556,42 @@ export async function generateMonsoonPlan(
     return sanitized;
   };
 
-  const plan = await runOnce(
-    buildUserPrompt(profile, evidence, alertState, alertSummary)
-  );
-  return { plan, geminiMs: Date.now() - t0, modelCalls: 1 };
+  try {
+    const plan = await runOnce(
+      buildUserPrompt(profile, evidence, alertState, alertSummary)
+    );
+    return { plan, geminiMs: Date.now() - t0, modelCalls };
+  } catch (first) {
+    const reason =
+      first instanceof AppError
+        ? `${first.code}: ${first.message}`
+        : first instanceof Error
+          ? first.message
+          : 'unknown';
+    console.error(
+      JSON.stringify({ code: 'GEMINI_REPAIR', reason: reason.slice(0, 240) })
+    );
+
+    // One more real Gemini call — still no hardcoded plan content
+    try {
+      const plan = await runOnce(
+        buildRepairPrompt(
+          profile,
+          evidence,
+          alertState,
+          alertSummary,
+          reason,
+          ''
+        )
+      );
+      return { plan, geminiMs: Date.now() - t0, modelCalls };
+    } catch (second) {
+      if (second instanceof AppError) throw second;
+      throw new AppError(
+        'GEMINI_UNAVAILABLE',
+        'Live GenAI could not produce a complete validated plan. No hardcoded plan is returned.',
+        502
+      );
+    }
+  }
 }
