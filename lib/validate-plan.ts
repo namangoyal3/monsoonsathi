@@ -1,4 +1,4 @@
-import type { Evidence, GeneratedPlan } from '@/types/contract';
+import type { Action, Evidence, EvidenceKind, GeneratedPlan } from '@/types/contract';
 
 const PHONE_RE = /\b(?:\+?\d[\d\s\-()]{7,}\d)\b/;
 const URL_RE = /https?:\/\/|www\./i;
@@ -32,7 +32,8 @@ function allSourceIds(plan: GeneratedPlan): string[] {
 
 /**
  * Semantic safety validation after Zod parse.
- * Rejects unknown sources, invented contacts, HTML, and unsupported route-safety claims.
+ * Every failure rejects the plan. Model output is never patched with evidence it did
+ * not cite because that would turn an unsupported answer into a false positive.
  */
 export function validatePlanSemantics(
   plan: GeneratedPlan,
@@ -41,7 +42,7 @@ export function validatePlanSemantics(
 ): ValidationResult {
   const reasons: string[] = [];
   const allowed = new Set(evidence.map((e) => e.id));
-  const byId = new Map(evidence.map((e) => [e.id, e]));
+  const byId = new Map(evidence.map((item) => [item.id, item]));
 
   for (const id of allSourceIds(plan)) {
     if (!allowed.has(id)) {
@@ -60,45 +61,30 @@ export function validatePlanSemantics(
     reasons.push('unsupported_route_safety_claim');
   }
 
-  // Actions claiming official_alert basis need alert-kind evidence or active alert
-  const allActions = [
+  const actions: Action[] = [
     ...plan.doNow,
     ...plan.doNext,
     ...plan.checklist,
     ...plan.selectedPhase,
     ...plan.supportActions,
   ];
-  for (const a of allActions) {
-    if (a.basis === 'official_alert') {
-      if (opts.alertState !== 'active') {
-        reasons.push(`official_alert_basis_without_active_alert:${a.title}`);
-      }
-      const hasAlertSource = a.sourceIds.some(
-        (id) => byId.get(id)?.kind === 'official_alert'
-      );
-      if (!hasAlertSource) {
-        reasons.push(`official_alert_basis_missing_alert_source:${a.title}`);
-      }
+  const expectedKind: Partial<Record<Action['basis'], EvidenceKind>> = {
+    official_alert: 'official_alert',
+    weather: 'weather',
+    route: 'route',
+    official_guidance: 'official_guidance',
+  };
+
+  for (const action of actions) {
+    const kind = expectedKind[action.basis];
+    if (
+      kind &&
+      !action.sourceIds.some((id) => byId.get(id)?.kind === kind)
+    ) {
+      reasons.push(`basis_without_matching_evidence:${action.basis}:${action.title}`);
     }
-    if (a.basis === 'weather') {
-      const hasWeather = a.sourceIds.some((id) => byId.get(id)?.kind === 'weather');
-      if (!hasWeather) {
-        reasons.push(`weather_basis_without_weather_source:${a.title}`);
-      }
-    }
-    if (a.basis === 'route') {
-      const hasRoute = a.sourceIds.some((id) => byId.get(id)?.kind === 'route');
-      if (!hasRoute) {
-        reasons.push(`route_basis_without_route_source:${a.title}`);
-      }
-    }
-    if (a.basis === 'official_guidance') {
-      const hasGuidance = a.sourceIds.some(
-        (id) => byId.get(id)?.kind === 'official_guidance'
-      );
-      if (!hasGuidance) {
-        reasons.push(`official_guidance_basis_without_guidance_source:${a.title}`);
-      }
+    if (action.basis === 'official_alert' && opts.alertState !== 'active') {
+      reasons.push(`official_alert_basis_without_active_alert:${action.title}`);
     }
   }
 
@@ -111,13 +97,10 @@ export function validatePlanSemantics(
 
   if (plan.travel) {
     if (plan.travel.recommendation === 'go') {
-      reasons.push('travel_go_not_supported');
+      reasons.push('travel_recommendation_go_not_supported');
     }
-    const hasRoute = plan.travel.sourceIds.some(
-      (id) => byId.get(id)?.kind === 'route'
-    );
-    if (!hasRoute) {
-      reasons.push('travel_missing_route_source');
+    if (!plan.travel.sourceIds.some((id) => byId.get(id)?.kind === 'route')) {
+      reasons.push('travel_without_route_evidence');
     }
     if (ROUTE_SAFETY_RE.test(plan.travel.reason)) {
       reasons.push('travel_reason_route_safety_claim');
@@ -127,7 +110,8 @@ export function validatePlanSemantics(
     }
   }
 
-  // Drop empty support is fine; require non-empty core arrays (Zod already does)
-
-  return { ok: reasons.length === 0, reasons };
+  return {
+    ok: reasons.length === 0,
+    reasons,
+  };
 }

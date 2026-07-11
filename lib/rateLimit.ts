@@ -28,6 +28,11 @@ export function checkRateLimit(
       for (const [k, b] of buckets) {
         if (b.resetAt <= now) buckets.delete(k);
       }
+      while (buckets.size > 2000) {
+        const oldest = buckets.keys().next().value;
+        if (oldest === undefined) break;
+        buckets.delete(oldest);
+      }
     }
     return { ok: true, remaining: limit - 1, resetAt };
   }

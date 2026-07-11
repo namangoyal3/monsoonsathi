@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { ProfileSchema, GeneratedPlanSchema } from '@/lib/schema';
 import { coercePlanShape } from '@/lib/gemini';
-import {
-  sanitizePlanSourceIds,
-  validatePlanSemantics,
-} from '@/lib/validate-plan';
+import { validatePlanSemantics } from '@/lib/validate-plan';
 import { classifyWeatherRisk, describeWeatherCode } from '@/lib/weather';
 import { checkRateLimit } from '@/lib/rateLimit';
+import { cacheGet, cacheSet, weatherCacheKey } from '@/lib/cache';
+import type { WeatherBundle } from '@/lib/weather';
+import { fetchLiveWeather } from '@/lib/weather';
 import type { Evidence, GeneratedPlan } from '@/types/contract';
 
 const evidence: Evidence[] = [
@@ -178,7 +178,7 @@ describe('validatePlanSemantics', () => {
     expect(result.reasons.some((r) => r.includes('phone'))).toBe(true);
   });
 
-  it('sanitizes unknown source ids', () => {
+  it('rejects unknown source ids instead of hiding model invention', () => {
     const dirty = samplePlan({
       doNow: [
         {
@@ -193,8 +193,53 @@ describe('validatePlanSemantics', () => {
         },
       ],
     });
-    const clean = sanitizePlanSourceIds(dirty, evidence);
-    expect(clean.doNow[0]?.sourceIds.includes('fake-99')).toBe(false);
+    const result = validatePlanSemantics(dirty, evidence, {
+      hasDestination: false,
+      alertState: 'unavailable',
+    });
+    expect(result.reasons).toContain('unknown_source_id:fake-99');
+  });
+
+  it('rejects unprovable travel approval even without a flood-safe phrase', () => {
+    const routeEvidence: Evidence[] = [
+      ...evidence,
+      { id: 'r-1', kind: 'route', text: 'Distance only', publisher: 'OSRM' },
+    ];
+    const plan = samplePlan({
+      travel: {
+        recommendation: 'go',
+        reason: 'Conditions look manageable; proceed with caution.',
+        cautions: ['Avoid flooded stretches if conditions change'],
+        sourceIds: ['r-1'],
+      },
+    });
+    const result = validatePlanSemantics(plan, routeEvidence, {
+      hasDestination: true,
+      alertState: 'unavailable',
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reasons).toContain('travel_recommendation_go_not_supported');
+  });
+
+  it('rejects flood-safe travel claims in supported languages', () => {
+    const routeEvidence: Evidence[] = [
+      ...evidence,
+      { id: 'r-1', kind: 'route', text: 'Distance only', publisher: 'OSRM' },
+    ];
+    const plan = samplePlan({
+      travel: {
+        recommendation: 'go',
+        reason: 'मार्ग सुरक्षित',
+        cautions: [],
+        sourceIds: ['r-1'],
+      },
+    });
+    const result = validatePlanSemantics(plan, routeEvidence, {
+      hasDestination: true,
+      alertState: 'unavailable',
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reasons).toContain('unsupported_route_safety_claim');
   });
 });
 
@@ -223,6 +268,60 @@ describe('weather helpers', () => {
       forecastPrecipMm: 0,
     });
     expect(r.risk).toBe('normal');
+  });
+
+  it('uses the current locality label when rounded coordinates hit cache', async () => {
+    const key = weatherCacheKey(12.97161, 77.59461);
+    const cached: WeatherBundle = {
+      weather: {
+        provider: 'OpenWeather',
+        locationLabel: 'Old label',
+        latitude: 12.972,
+        longitude: 77.595,
+        temperatureC: 24,
+        humidityPct: 80,
+        precipitationMm: 1,
+        weatherCode: 500,
+        weatherDescription: 'rain',
+        windSpeedKmh: 6,
+        observedAt: new Date().toISOString(),
+        forecastSummary: 'Rain possible.',
+        nextHours: [],
+        weatherRisk: 'elevated',
+        weatherRiskSummary: 'Weather-derived risk.',
+      },
+      sources: [
+        {
+          id: 'w-current-1',
+          kind: 'weather',
+          text: 'Current at Old label: rain.',
+          publisher: 'OpenWeather',
+        },
+      ],
+      alertState: 'none',
+      alertSummary: 'No publisher alerts.',
+      weatherMs: 10,
+    };
+    cacheSet(key, cached, 60_000);
+
+    const result = await fetchLiveWeather({
+      label: 'Current label',
+      latitude: 12.97162,
+      longitude: 77.59462,
+    });
+
+    expect(result.weather.locationLabel).toBe('Current label');
+    expect(result.sources[0]?.text).toContain('Current at Current label');
+    expect(result.sources[0]?.text).not.toContain('Old label');
+  });
+});
+
+describe('cache', () => {
+  it('caps public weather entries', () => {
+    const prefix = `cap-${Date.now()}-${Math.random()}-`;
+    for (let i = 0; i <= 500; i++) cacheSet(`${prefix}${i}`, i, 60_000);
+    expect(cacheGet(`${prefix}0`)).toBeNull();
+    expect(cacheGet(`${prefix}500`)).toBe(500);
   });
 });
 

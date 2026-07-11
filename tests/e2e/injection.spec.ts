@@ -10,7 +10,8 @@ test('prompt-injection locality yields friendly error, no leakage', async ({ pag
   await page.getByRole('button', { name: /create my live monsoon plan/i }).click();
 
   // Friendly, honest error panel — never a canned plan, never model internals.
-  const alert = page.locator('[role="alert"]');
+  // Scoped to the status region: the page has a second global alert live-region.
+  const alert = page.locator('[role="status"] [role="alert"]');
   await expect(alert).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole('heading', { name: /couldn.t create a safe plan/i })).toBeVisible();
 

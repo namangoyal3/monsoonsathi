@@ -1,21 +1,33 @@
 import { test, expect } from '@playwright/test';
 
-// One real end-to-end submit: live geocode + live weather + one live Gemini call.
-test('submit form and receive a live plan dashboard', async ({ page }) => {
-  test.setTimeout(90_000);
-  await page.goto('/');
+const scenarios = [
+  { name: 'family during English', demo: /family · during · en/i, lang: 'en', support: true },
+  { name: 'community after Kannada', demo: /community · after · kn/i, lang: 'kn', support: true },
+  { name: 'individual before Hindi', demo: /individual · before · hi/i, lang: 'hi' },
+  { name: 'travel stress English', demo: /travel stress · en/i, lang: 'en', travel: true },
+] as const;
 
-  await page.getByLabel(/locality or pincode/i).fill('Indiranagar, Bengaluru');
-  await page.getByRole('button', { name: /create my live monsoon plan/i }).click();
+for (const scenario of scenarios) {
+  test(`live demo: ${scenario.name}`, async ({ page }) => {
+    test.setTimeout(100_000);
+    await page.goto('/');
+    await page.getByRole('button', { name: scenario.demo }).click();
+    await page.getByRole('button', { name: /create my live monsoon plan/i }).click();
 
-  // Plan heading appears once the live pipeline finishes.
-  const planTitle = page.locator('#plan-title');
-  await expect(planTitle).toBeVisible({ timeout: 60_000 });
+    await expect(page.locator('#plan-title')).toBeVisible({ timeout: 65_000 });
+    await expect(page.getByText(/live weather fact/i)).toBeVisible();
+    await expect(page.getByText(/Live GenAI · [1-9]/)).toBeVisible();
+    await expect(page.locator('.action-card').first()).toBeVisible();
+    await expect(page.locator('.source-card').first()).toBeVisible();
+    await expect(page.locator(`[lang="${scenario.lang}"]`).first()).toBeVisible();
 
-  // Live weather fact labelling is present.
-  await expect(page.getByText(/live weather/i).first()).toBeVisible();
-
-  // At least one generated action item exists (checklist or do-now list).
-  const items = page.locator('main li');
-  expect(await items.count()).toBeGreaterThan(0);
-});
+    if ('support' in scenario && scenario.support) {
+      await expect(page.locator('#support-title')).toBeVisible();
+    }
+    if ('travel' in scenario && scenario.travel) {
+      const travelTitle = page.locator('#travel-title');
+      await expect(travelTitle).toBeVisible();
+      await expect(travelTitle).not.toContainText(/recommendation:\s*go/i);
+    }
+  });
+}

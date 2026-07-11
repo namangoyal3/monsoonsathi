@@ -11,7 +11,11 @@
     "selfcheck": "tsx scripts/selfcheck.ts",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "verify": "npm run typecheck && npm run selfcheck && npm run test && npm run build"
+    "verify": "npm run lint && npm run typecheck && npm run selfcheck && npm run test && npm run build",
+    "verify:live": "npm run verify && npm run test:e2e"
+  },
+  "engines": {
+    "node": ">=20.9.0"
   },
   "dependencies": {
     "next": "16.2.10",

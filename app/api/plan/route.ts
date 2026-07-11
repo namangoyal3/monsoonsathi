@@ -8,6 +8,7 @@ import { checkRateLimit, clientIpFromRequest } from '@/lib/rateLimit';
 import type { PlanResponse, Profile } from '@/types/contract';
 
 export const maxDuration = 60;
+const MAX_BODY_BYTES = 32_000;
 
 function json(
   body: PlanResponse,
@@ -24,9 +25,34 @@ function json(
   });
 }
 
+async function readBody(request: Request): Promise<string> {
+  const declared = Number(request.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) {
+    throw new AppError('PAYLOAD_TOO_LARGE', 'Request body too large.', 413);
+  }
+  if (!request.body) return '';
+
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let text = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    bytes += value.byteLength;
+    if (bytes > MAX_BODY_BYTES) {
+      await reader.cancel();
+      throw new AppError('PAYLOAD_TOO_LARGE', 'Request body too large.', 413);
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+  return text + decoder.decode();
+}
+
 export async function POST(request: Request): Promise<Response> {
   const started = Date.now();
   const requestId = `ms-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const deadline = AbortSignal.timeout(55_000);
 
   try {
     const ip = clientIpFromRequest(request);
@@ -44,14 +70,7 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
 
-    // Bound body size (~32kb)
-    const rawText = await request.text();
-    if (rawText.length > 32_000) {
-      return json(
-        { ok: false, error: 'Request body too large.', code: 'PAYLOAD_TOO_LARGE' },
-        413
-      );
-    }
+    const rawText = await readBody(request);
 
     let body: unknown;
     try {
@@ -78,27 +97,35 @@ export async function POST(request: Request): Promise<Response> {
     const profile = normalizeProfile(parsed.data.profile);
 
     // 1) Live location
-    const location = await geocodeLocality(profile.locality);
+    const location = await geocodeLocality(profile.locality, deadline);
 
-    // 2) Live weather (+ optional travel context in parallel after we have origin)
-    const weatherBundle = await fetchLiveWeather(location);
+    // 2) Independent live lookups run together under the request deadline.
+    const [weatherBundle, travelEvidence] = await Promise.all([
+      fetchLiveWeather(location, deadline),
+      profile.destination?.trim()
+        ? buildTravelEvidence(
+            location,
+            profile.destination.trim(),
+            profile.transportMode,
+            deadline
+          )
+        : Promise.resolve(null),
+    ]);
 
     const evidence = [
       ...weatherBundle.sources,
       getNdmaGuidanceEvidence(),
     ];
 
-    if (profile.destination?.trim()) {
-      const travelEv = await buildTravelEvidence(location, profile.destination.trim());
-      if (travelEv) evidence.push(travelEv);
-    }
+    if (travelEvidence) evidence.push(travelEvidence);
 
     // 3) Real Gemini generation only — no hardcoded plan content
     const { plan, geminiMs, modelCalls } = await generateMonsoonPlan(
       profile,
       evidence,
       weatherBundle.alertState,
-      weatherBundle.alertSummary
+      weatherBundle.alertSummary,
+      deadline
     );
 
     if (modelCalls < 1) {

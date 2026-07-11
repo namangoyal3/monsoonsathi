@@ -9,7 +9,10 @@ export interface GeocodedLocation {
 }
 
 /** Resolve user text with OpenWeather's live geocoder; coordinates are never inferred. */
-export async function geocodeLocality(locality: string): Promise<GeocodedLocation> {
+export async function geocodeLocality(
+  locality: string,
+  signal?: AbortSignal
+): Promise<GeocodedLocation> {
   const q = locality.trim();
   if (!q) throw new AppError('INVALID_LOCATION', 'Location is required.', 400);
 
@@ -21,7 +24,9 @@ export async function geocodeLocality(locality: string): Promise<GeocodedLocatio
   let res: Response;
   try {
     res = await fetch(url, {
-      signal: AbortSignal.timeout(12_000),
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(12_000)])
+        : AbortSignal.timeout(12_000),
       headers: { Accept: 'application/json' },
       cache: 'no-store',
     });

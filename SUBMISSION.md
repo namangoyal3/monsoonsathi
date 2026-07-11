@@ -42,12 +42,13 @@ Summarized from `docs/SECURITY.md`:
 - `npm run lint` — passed.
 - `npm run typecheck` — passed.
 - `npm run selfcheck` — passed.
-- `npm test` — 10/10 Vitest tests passed.
+- `npm test` — 12/12 Vitest tests passed.
 - `npm run build` — Next.js production build passed.
 - Local live-service smoke — HTTP 200, OpenWeather evidence, 4 checklist actions, 2 do-now actions, and exactly 1 Gemini model call.
 - `npm audit` — zero high/critical findings. Two moderate advisories remain in Next.js's bundled PostCSS version; the proposed forced fix would downgrade Next.js and was not applied.
 
-Automated browser, axe, keyboard, and mobile checks are present in the repository but were not executed in this environment because no browser surface was available. They are not claimed as passes.
+- `npm run test:e2e` — 8/8 Playwright tests passed against the local live-service dev server: a11y (axe), home labels / demo chips / axe, prompt-injection error surface with no leakage, keyboard-only operability, mobile viewport without horizontal scroll, and a live plan smoke. Suite runs serially (`workers: 1`) so concurrent submits don't trip free-tier API quotas.
+- The injection spec caught `lib/geocode.ts` echoing raw unresolved input into the error panel; the message is now generic and never reflects user input.
 
 ## Production test
 

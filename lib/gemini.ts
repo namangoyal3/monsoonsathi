@@ -36,7 +36,7 @@ const GEMINI_RESPONSE_SCHEMA = {
           properties: {
             recommendation: {
               type: 'string',
-              enum: ['go', 'delay', 'reconsider', 'insufficient_data'],
+              enum: ['delay', 'reconsider', 'insufficient_data'],
             },
             reason: { type: 'string' },
             cautions: { type: 'array', items: { type: 'string' } },
@@ -511,12 +511,6 @@ export async function generateMonsoonPlan(
   const runOnce = async (user: string): Promise<GeneratedPlan> => {
     const raw = await geminiComplete(system, user, signal, () => modelCalls++);
     const plan = parsePlan(raw);
-
-    // Destination rule is structural (not content invention)
-    if (!profile.destination?.trim()) {
-      plan.travel = null;
-    }
-
     assertGenAiCompleteness(plan, profile);
 
     const semantic = validatePlanSemantics(plan, evidence, {
@@ -540,11 +534,23 @@ export async function generateMonsoonPlan(
     );
     return { plan, geminiMs: Date.now() - t0, modelCalls };
   } catch (first) {
-    const reason =
-      first instanceof AppError ? first.code : 'UNKNOWN';
-    console.error(
-      JSON.stringify({ code: 'GEMINI_REPAIR', reason })
-    );
+    const repairable = new Set([
+      'GEMINI_INVALID_JSON',
+      'GEMINI_SCHEMA',
+      'GEMINI_INCOMPLETE',
+      'GEMINI_UNSAFE',
+      'GEMINI_EMPTY',
+    ]);
+    if (
+      signal.aborted ||
+      !(first instanceof AppError) ||
+      !repairable.has(first.code)
+    ) {
+      throw first;
+    }
+
+    const reason = first.code;
+    console.error(JSON.stringify({ code: 'GEMINI_REPAIR', reason }));
 
     // One more real Gemini call — still no hardcoded plan content
     try {

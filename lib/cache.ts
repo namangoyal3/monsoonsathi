@@ -21,6 +21,11 @@ export function cacheSet<T>(key: string, value: T, ttlMs: number): void {
     for (const [k, v] of store) {
       if (v.expiresAt <= now) store.delete(k);
     }
+    while (store.size > 500) {
+      const oldest = store.keys().next().value;
+      if (oldest === undefined) break;
+      store.delete(oldest);
+    }
   }
 }
 

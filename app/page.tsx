@@ -175,6 +175,12 @@ function PlanView({ result, onClear }: { result: PlanResponseSuccess; onClear: (
   const [checked, setChecked] = useState<Set<number>>(new Set());
   const completed = checked.size;
   const total = result.plan.checklist.length;
+  const planLang =
+    result.profile.language === 'Hindi'
+      ? 'hi'
+      : result.profile.language === 'Kannada'
+        ? 'kn'
+        : 'en';
 
   return (
     <div className="animate-rise space-y-5">
@@ -283,7 +289,7 @@ function PlanView({ result, onClear }: { result: PlanResponseSuccess; onClear: (
           </div>
           <span className="ms-badge bg-chili-soft text-chili">{result.plan.actionState}</span>
         </div>
-        <div className="mt-4 divide-y divide-line">
+        <div className="mt-4 divide-y divide-line" lang={planLang}>
           {result.plan.doNow.map((action, index) => <ActionCard key={`${action.title}-${index}`} action={action} index={index} />)}
         </div>
       </section>
@@ -291,8 +297,8 @@ function PlanView({ result, onClear }: { result: PlanResponseSuccess; onClear: (
       <section className="why-card" aria-labelledby="why-title">
         <p className="eyebrow text-leaf">AI interpretation · grounded in sources below</p>
         <h3 id="why-title" className="mt-1 font-display text-xl font-semibold">Why this is prioritized for you</h3>
-        <p className="mt-3 leading-7 text-ink-soft">{result.plan.whyPrioritized}</p>
-        <p className="mt-3 border-t border-leaf/15 pt-3 text-sm leading-6 text-ink-soft">{result.plan.interpretation}</p>
+        <p lang={planLang} className="mt-3 leading-7 text-ink-soft">{result.plan.whyPrioritized}</p>
+        <p lang={planLang} className="mt-3 border-t border-leaf/15 pt-3 text-sm leading-6 text-ink-soft">{result.plan.interpretation}</p>
       </section>
 
       <section className="ms-card" aria-labelledby="checklist-title">
@@ -304,7 +310,7 @@ function PlanView({ result, onClear }: { result: PlanResponseSuccess; onClear: (
           <span className="tabular text-sm font-semibold text-leaf" aria-live="polite">{completed}/{total} ready</span>
         </div>
         <div className="progress-track mt-4" aria-hidden="true"><span style={{ width: `${total ? (completed / total) * 100 : 0}%` }} /></div>
-        <div className="mt-3 space-y-1">
+        <div className="mt-3 space-y-1" lang={planLang}>
           {result.plan.checklist.map((item, index) => {
             const id = `check-${result.requestId}-${index}`;
             const isChecked = checked.has(index);
@@ -331,13 +337,13 @@ function PlanView({ result, onClear }: { result: PlanResponseSuccess; onClear: (
       <div className="grid gap-5 lg:grid-cols-2">
         <section className="ms-card" aria-labelledby="next-title">
           <div className="section-heading"><div><p className="eyebrow text-turmeric">After urgent tasks</p><h3 id="next-title">Prepare next</h3></div></div>
-          <div className="mt-3 divide-y divide-line">
+          <div className="mt-3 divide-y divide-line" lang={planLang}>
             {result.plan.doNext.map((action, index) => <ActionCard key={`${action.title}-${index}`} action={action} index={index} />)}
           </div>
         </section>
         <section className="ms-card" aria-labelledby="phase-title">
           <div className="section-heading"><div><p className="eyebrow text-leaf">Selected phase · AI-generated</p><h3 id="phase-title" className="capitalize">{result.profile.phase} the event</h3></div></div>
-          <div className="mt-3 divide-y divide-line">
+          <div className="mt-3 divide-y divide-line" lang={planLang}>
             {result.plan.selectedPhase.map((action, index) => <ActionCard key={`${action.title}-${index}`} action={action} index={index} />)}
           </div>
         </section>
@@ -359,7 +365,7 @@ function PlanView({ result, onClear }: { result: PlanResponseSuccess; onClear: (
           ] as const).map(([label, text]) => (
             <div key={label} className="rounded-xl border border-line bg-parchment/40 px-3 py-3">
               <dt className="text-sm font-semibold text-ink">{label}</dt>
-              <dd className="mt-1 text-sm leading-6 text-ink-soft">{text}</dd>
+              <dd lang={planLang} className="mt-1 text-sm leading-6 text-ink-soft">{text}</dd>
             </div>
           ))}
         </dl>
@@ -368,7 +374,7 @@ function PlanView({ result, onClear }: { result: PlanResponseSuccess; onClear: (
       {result.plan.supportActions.length > 0 && (
         <section className="ms-card" aria-labelledby="support-title">
           <div className="section-heading"><div><p className="eyebrow text-leaf">Personalized support</p><h3 id="support-title">People and needs to prioritize</h3></div></div>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div className="mt-3 grid gap-3 sm:grid-cols-2" lang={planLang}>
             {result.plan.supportActions.map((action, index) => <ActionCard key={`${action.title}-${index}`} action={action} index={index} />)}
           </div>
         </section>
@@ -379,8 +385,8 @@ function PlanView({ result, onClear }: { result: PlanResponseSuccess; onClear: (
           <div className="section-heading">
             <div><p className="eyebrow">Travel context</p><h3 id="travel-title">Recommendation: <span className="capitalize">{result.plan.travel.recommendation.replace('_', ' ')}</span></h3></div>
           </div>
-          <p className="mt-3 leading-6">{result.plan.travel.reason}</p>
-          {result.plan.travel.cautions.length > 0 && <ul className="mt-3 list-disc space-y-1 pl-5 text-sm">{result.plan.travel.cautions.map((c) => <li key={c}>{c}</li>)}</ul>}
+          <p lang={planLang} className="mt-3 leading-6">{result.plan.travel.reason}</p>
+          {result.plan.travel.cautions.length > 0 && <ul lang={planLang} className="mt-3 list-disc space-y-1 pl-5 text-sm">{result.plan.travel.cautions.map((c) => <li key={c}>{c}</li>)}</ul>}
           <p className="mt-4 border-t border-current/15 pt-3 text-xs font-medium">Traffic or distance context never proves that a road is flood-safe, open, or passable. Check local authorities before travel.</p>
         </section>
       )}
@@ -399,14 +405,14 @@ function PlanView({ result, onClear }: { result: PlanResponseSuccess; onClear: (
         <details className="mt-4 rounded-xl border border-line px-4 py-3">
           <summary className="cursor-pointer font-semibold">Assumptions and limitations</summary>
           <div className="mt-3 grid gap-4 text-sm text-ink-soft sm:grid-cols-2">
-            <div><p className="font-semibold text-ink">Assumptions</p><ul className="mt-1 list-disc space-y-1 pl-5">{result.plan.assumptions.length ? result.plan.assumptions.map((item) => <li key={item}>{item}</li>) : <li>None stated.</li>}</ul></div>
-            <div><p className="font-semibold text-ink">Limitations</p><ul className="mt-1 list-disc space-y-1 pl-5">{result.plan.limitations.map((item) => <li key={item}>{item}</li>)}</ul></div>
+            <div><p className="font-semibold text-ink">Assumptions</p><ul lang={planLang} className="mt-1 list-disc space-y-1 pl-5">{result.plan.assumptions.length ? result.plan.assumptions.map((item) => <li key={item}>{item}</li>) : <li lang="en">None stated.</li>}</ul></div>
+            <div><p className="font-semibold text-ink">Limitations</p><ul lang={planLang} className="mt-1 list-disc space-y-1 pl-5">{result.plan.limitations.map((item) => <li key={item}>{item}</li>)}</ul></div>
           </div>
         </details>
       </section>
 
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-white/70 p-4">
-        <p className="text-xs text-ink-faint">Request {result.requestId} · No profile or plan is saved in this browser.</p>
+        <p className="text-xs text-ink-faint">Request {result.requestId} · MonsoonSathi does not persist your profile or plan.</p>
         <button type="button" className="ms-btn-ghost" onClick={onClear}>Clear my plan</button>
       </div>
     </div>
@@ -423,10 +429,6 @@ export default function Home() {
 
   const update = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
-    if (key === 'language' && typeof document !== 'undefined') {
-      const lang = value === 'Hindi' ? 'hi' : value === 'Kannada' ? 'kn' : 'en';
-      document.documentElement.lang = lang;
-    }
   };
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -566,7 +568,7 @@ export default function Home() {
               </details>
 
               <button type="submit" className="ms-btn-primary mt-6 flex w-full items-center justify-center gap-2" disabled={loading}>{loading ? <><span className="spinner" aria-hidden="true" /> Creating your live plan…</> : <>Create my live monsoon plan <span aria-hidden="true">→</span></>}</button>
-              <p id="privacy-note" className="mt-3 text-center text-xs leading-5 text-ink-faint">Your profile stays in this tab and is not saved. AI guidance supports—not replaces—official instructions.</p>
+              <p id="privacy-note" className="mt-3 text-center text-xs leading-5 text-ink-faint">Your location is sent to OpenWeather and your profile to Gemini; MonsoonSathi does not persist either. AI guidance supports—not replaces—official instructions.</p>
             </form>
           </aside>
 

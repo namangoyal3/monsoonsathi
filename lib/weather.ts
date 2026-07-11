@@ -6,6 +6,7 @@ import type {
   AlertState,
   Evidence,
   LiveWeatherSnapshot,
+  TransportMode,
   WeatherRisk,
 } from '@/types/contract';
 
@@ -110,11 +111,13 @@ function openWeatherUrl(path: string, location: GeocodedLocation): URL {
   return url;
 }
 
-async function fetchJson<T>(url: URL): Promise<T> {
+async function fetchJson<T>(url: URL, signal?: AbortSignal): Promise<T> {
   let response: Response;
   try {
     response = await fetch(url, {
-      signal: AbortSignal.timeout(12_000),
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(12_000)])
+        : AbortSignal.timeout(12_000),
       headers: { Accept: 'application/json' },
       cache: 'no-store',
     });
@@ -137,14 +140,17 @@ async function fetchJson<T>(url: URL): Promise<T> {
 
 /** Best-effort official/publisher alerts via OpenWeather One Call (may be unavailable on free keys). */
 async function tryFetchPublisherAlerts(
-  location: GeocodedLocation
+  location: GeocodedLocation,
+  signal?: AbortSignal
 ): Promise<{ alerts: Evidence[]; state: AlertState; summary: string } | null> {
   // One Call 3.0 often requires a paid plan; fail soft if unauthorized.
   const url = openWeatherUrl('/data/3.0/onecall', location);
   url.searchParams.set('exclude', 'minutely,hourly,daily');
   try {
     const res = await fetch(url.toString(), {
-      signal: AbortSignal.timeout(8_000),
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(8_000)])
+        : AbortSignal.timeout(8_000),
       headers: { Accept: 'application/json' },
       cache: 'no-store',
     });
@@ -181,7 +187,8 @@ async function tryFetchPublisherAlerts(
 
 /** Fetch live current conditions and short forecast from OpenWeather. */
 export async function fetchLiveWeather(
-  location: GeocodedLocation
+  location: GeocodedLocation,
+  signal?: AbortSignal
 ): Promise<WeatherBundle> {
   const t0 = Date.now();
   const cacheKey = weatherCacheKey(location.latitude, location.longitude);
@@ -194,13 +201,24 @@ export async function fetchLiveWeather(
         ...cached.weather,
         locationLabel: location.label,
       },
+      sources: cached.sources.map((source) =>
+        source.id === 'w-current-1'
+          ? {
+              ...source,
+              text: `Current at ${location.label}: ${cached.weather.weatherDescription}, ${cached.weather.temperatureC}°C, humidity ${cached.weather.humidityPct}%, precipitation ${cached.weather.precipitationMm}mm, wind ${cached.weather.windSpeedKmh.toFixed(1)} km/h.`,
+            }
+          : source
+      ),
     };
   }
 
   const [current, forecast, publisher] = await Promise.all([
-    fetchJson<CurrentResponse>(openWeatherUrl('/data/2.5/weather', location)),
-    fetchJson<ForecastResponse>(openWeatherUrl('/data/2.5/forecast', location)),
-    tryFetchPublisherAlerts(location),
+    fetchJson<CurrentResponse>(openWeatherUrl('/data/2.5/weather', location), signal),
+    fetchJson<ForecastResponse>(
+      openWeatherUrl('/data/2.5/forecast', location),
+      signal
+    ),
+    tryFetchPublisherAlerts(location, signal),
   ]);
 
   const temperature = current.main?.temp;
@@ -323,11 +341,13 @@ export async function fetchLiveWeather(
 /** Destination context: geocode + optional OSRM driving duration (never flood safety). */
 export async function buildTravelEvidence(
   origin: GeocodedLocation,
-  destinationLabel: string
+  destinationLabel: string,
+  transportMode: TransportMode,
+  signal?: AbortSignal
 ): Promise<Evidence> {
   const { geocodeLocality } = await import('@/lib/geocode');
   try {
-    const destination = await geocodeLocality(destinationLabel);
+    const destination = await geocodeLocality(destinationLabel, signal);
     const km = haversineKm(
       origin.latitude,
       origin.longitude,
@@ -335,32 +355,35 @@ export async function buildTravelEvidence(
       destination.longitude
     );
 
-    let routeNote =
-      'No live routing duration available; using straight-line distance only.';
-    try {
-      const osrm = new URL(
-        `https://router.project-osrm.org/route/v1/driving/${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}`
-      );
-      osrm.searchParams.set('overview', 'false');
-      const res = await fetch(osrm.toString(), {
-        signal: AbortSignal.timeout(8_000),
-        headers: { Accept: 'application/json' },
-      });
-      if (res.ok) {
-        const data = (await res.json()) as {
-          routes?: Array<{ duration?: number; distance?: number }>;
-        };
-        const route = data.routes?.[0];
-        if (route?.duration != null) {
-          const mins = Math.round(route.duration / 60);
-          const roadKm = route.distance
-            ? (route.distance / 1000).toFixed(1)
-            : km.toFixed(1);
-          routeNote = `OSRM driving estimate ≈ ${mins} minutes over ~${roadKm} km road distance (traffic-unaware, not flood-safe, not a guarantee roads are open).`;
+    let routeNote = `No live ${transportMode.replace('_', ' ')} routing is available; using straight-line distance only.`;
+    if (transportMode === 'car') {
+      try {
+        const osrm = new URL(
+          `https://router.project-osrm.org/route/v1/driving/${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}`
+        );
+        osrm.searchParams.set('overview', 'false');
+        const res = await fetch(osrm.toString(), {
+          signal: signal
+            ? AbortSignal.any([signal, AbortSignal.timeout(8_000)])
+            : AbortSignal.timeout(8_000),
+          headers: { Accept: 'application/json' },
+        });
+        if (res.ok) {
+          const data = (await res.json()) as {
+            routes?: Array<{ duration?: number; distance?: number }>;
+          };
+          const route = data.routes?.[0];
+          if (route?.duration != null) {
+            const mins = Math.round(route.duration / 60);
+            const roadKm = route.distance
+              ? (route.distance / 1000).toFixed(1)
+              : km.toFixed(1);
+            routeNote = `OSRM driving estimate ≈ ${mins} minutes over ~${roadKm} km road distance (traffic-unaware, not flood-safe, not a guarantee roads are open).`;
+          }
         }
+      } catch {
+        // keep distance-only note
       }
-    } catch {
-      // keep distance-only note
     }
 
     return {
@@ -368,14 +391,17 @@ export async function buildTravelEvidence(
       kind: 'route',
       observedAt: new Date().toISOString(),
       text: `Destination resolved as ${destination.label}. Straight-line distance ≈ ${km.toFixed(1)} km. ${routeNote} Never claim flood-safe or passable roads from this data.`,
-      publisher: 'OpenWeather Geocoding + OSRM (public routing)',
+      publisher:
+        transportMode === 'car'
+          ? 'OpenWeather Geocoding + OSRM (public routing)'
+          : 'OpenWeather Geocoding',
     };
   } catch {
     return {
       id: 'r-dest-1',
       kind: 'route',
       observedAt: new Date().toISOString(),
-      text: `Destination “${destinationLabel}” could not be resolved. Travel guidance must use insufficient_data unless live weather alone justifies delay/reconsider.`,
+      text: 'The requested destination could not be resolved. Travel guidance must use insufficient_data unless live weather alone justifies delay/reconsider.',
       publisher: 'MonsoonSathi route context',
     };
   }
