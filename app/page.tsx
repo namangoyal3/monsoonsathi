@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useRef, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import type {
   Language,
   PlanResponse,
@@ -12,7 +12,10 @@ import {
   DEMO_SCENARIOS,
   INITIAL_FORM,
   PHASES,
+  PREFERENCE_MEMORY_KEY,
   SUPPORT_NEEDS,
+  parseRememberedPreferences,
+  rememberablePreferences,
   type FormState,
 } from '@/app/form-config';
 import { PlanView } from '@/app/plan-view';
@@ -22,11 +25,57 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState<PlanResponseSuccess | null>(null);
+  const [rememberPreferences, setRememberPreferences] = useState(false);
+  const [memoryReady, setMemoryReady] = useState(false);
+  const [memoryStatus, setMemoryStatus] = useState('');
   const statusRef = useRef<HTMLDivElement>(null);
   const firstFieldRef = useRef<HTMLInputElement>(null);
 
+  useEffect(() => {
+    const restore = window.setTimeout(() => {
+      try {
+        const raw = window.localStorage.getItem(PREFERENCE_MEMORY_KEY);
+        const saved = parseRememberedPreferences(raw);
+        if (saved) {
+          setForm((current) => ({ ...current, ...saved }));
+          setRememberPreferences(true);
+          setMemoryStatus('Basic preferences restored from this device.');
+        } else if (raw) {
+          window.localStorage.removeItem(PREFERENCE_MEMORY_KEY);
+        }
+      } catch {
+        setMemoryStatus('This browser could not read saved preferences.');
+      } finally {
+        setMemoryReady(true);
+      }
+    }, 0);
+
+    return () => window.clearTimeout(restore);
+  }, []);
+
+  function persistPreferences(nextForm: FormState, enabled: boolean): boolean {
+    try {
+      if (enabled) {
+        window.localStorage.setItem(
+          PREFERENCE_MEMORY_KEY,
+          JSON.stringify(rememberablePreferences(nextForm))
+        );
+      } else {
+        window.localStorage.removeItem(PREFERENCE_MEMORY_KEY);
+      }
+      return true;
+    } catch {
+      setMemoryStatus('This browser could not save preferences. Nothing was stored.');
+      return false;
+    }
+  }
+
   const update = <K extends keyof FormState>(key: K, value: FormState[K]) => {
-    setForm((current) => ({ ...current, [key]: value }));
+    const nextForm = { ...form, [key]: value };
+    setForm(nextForm);
+    if (rememberPreferences && !persistPreferences(nextForm, true)) {
+      setRememberPreferences(false);
+    }
   };
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -111,6 +160,9 @@ export default function Home() {
                       className="ms-btn-ghost text-left !px-2.5 !py-1.5 !text-xs"
                       onClick={() => {
                         setForm(scenario.form);
+                        if (rememberPreferences && !persistPreferences(scenario.form, true)) {
+                          setRememberPreferences(false);
+                        }
                         setError('');
                         setResult(null);
                       }}
@@ -170,8 +222,34 @@ export default function Home() {
                 </div>
               </details>
 
+              <div className="mt-5 rounded-xl border border-line bg-cream p-3">
+                <label htmlFor="remember-preferences" className="flex cursor-pointer items-start gap-3 text-sm text-ink">
+                  <input
+                    id="remember-preferences"
+                    type="checkbox"
+                    className="mt-1 h-4 w-4 shrink-0 accent-leaf"
+                    checked={rememberPreferences}
+                    disabled={!memoryReady}
+                    onChange={(event) => {
+                      const enabled = event.target.checked;
+                      const persisted = persistPreferences(form, enabled);
+                      setRememberPreferences(enabled && persisted);
+                      if (persisted) {
+                        setMemoryStatus(
+                          enabled
+                            ? 'Basic preferences are remembered on this device.'
+                            : 'Saved basic preferences deleted from this device.'
+                        );
+                      }
+                    }}
+                  />
+                  <span><strong>Remember basic preferences on this device</strong><span className="mt-1 block text-xs leading-5 text-ink-soft">Saves only coarse locality, plan audience, language, travel mode and group size. Never saves destination, support needs, personal notes or generated plans. Uncheck to delete.</span></span>
+                </label>
+                {memoryStatus && <p className="mt-2 text-xs text-ink-soft" role="status" aria-live="polite">{memoryStatus}</p>}
+              </div>
+
               <button type="submit" className="ms-btn-primary mt-6 flex w-full items-center justify-center gap-2" disabled={loading}>{loading ? <><span className="spinner" aria-hidden="true" /> Creating your live plan…</> : <>Create my live monsoon plan <span aria-hidden="true">→</span></>}</button>
-              <p id="privacy-note" className="mt-3 text-center text-xs leading-5 text-ink-faint">Your location is sent to OpenWeather and your profile to Gemini; MonsoonSathi does not persist either. AI guidance supports—not replaces—official instructions.</p>
+              <p id="privacy-note" className="mt-3 text-center text-xs leading-5 text-ink-faint">Your location is sent to OpenWeather and your profile to Gemini; the server stores neither. Optional device memory saves only the basic preferences listed above. AI guidance supports—not replaces—official instructions.</p>
             </form>
           </aside>
 

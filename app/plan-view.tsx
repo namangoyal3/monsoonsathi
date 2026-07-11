@@ -291,10 +291,9 @@ export function PlanView({ result, onClear }: { result: PlanResponseSuccess; onC
       </section>
 
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-white/70 p-4">
-        <p className="text-xs text-ink-faint">Request {result.requestId} · MonsoonSathi does not persist your profile or plan.</p>
+        <p className="text-xs text-ink-faint">Request {result.requestId} · The server does not persist your profile or plan; optional basic preferences stay only on this device.</p>
         <button type="button" className="ms-btn-ghost" onClick={onClear}>Clear my plan</button>
       </div>
     </div>
   );
 }
-

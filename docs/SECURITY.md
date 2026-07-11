@@ -10,9 +10,13 @@
 | Secret leakage | Server-only `GEMINI_API_KEY` / `OPENWEATHER_API_KEY`; no `NEXT_PUBLIC_*` keys |
 | Abuse / cost | Rate limit 30 plan POSTs / min / IP (per instance) + 32 KB streamed-body cap + shared request deadline |
 | XSS via model HTML | React text rendering only; HTML/URL scan rejects model HTML |
-| Over-collection | No auth, no DB, no sensitive localStorage |
+| Over-collection | No auth or DB; opt-in localStorage allowlists only basic preferences and excludes destination, support needs, personal notes, and plans |
 
 Authentication is intentionally absent, so evaluator credentials are not required. No feature is hidden behind a login.
+
+## Device memory
+
+Basic preferences can be remembered only after explicit opt-in. The browser stores coarse locality, plan audience, language, travel mode, and group size in `localStorage`; the application validates this untrusted data before restoring it. Unchecking the option deletes it. Medical/support selections, destination, free-text context, and generated plans are never included. Device memory is browser-local, not cross-device, and clearing site data removes it.
 
 ## Headers
 

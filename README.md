@@ -163,7 +163,7 @@ Deterministic code owns: input validation, geocoding, weather fetch, source IDs,
 - Zod at request boundary
 - Profile treated as untrusted (XML-delimited in prompt)
 - No `dangerouslySetInnerHTML`
-- No sensitive profile persistence
+- No server-side or sensitive profile persistence; optional device memory stores only allowlisted basic preferences
 - Logs: request id + error code only
 
 ## Testing

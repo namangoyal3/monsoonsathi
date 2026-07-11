@@ -52,6 +52,83 @@ export const INITIAL_FORM: FormState = {
   support: emptySupport(),
 };
 
+// ponytail: Device-local only; add authenticated, encrypted server storage only for cross-device memory.
+export const PREFERENCE_MEMORY_KEY = 'monsoonsathi:preferences:v1';
+
+export interface RememberedPreferences {
+  version: 1;
+  locality: string;
+  scope: Scope;
+  language: Language;
+  transportMode: TransportMode;
+  householdSize: number;
+  communitySize: number;
+}
+
+/** Allowlist for opt-in device memory. Sensitive/context fields are excluded by construction. */
+export function rememberablePreferences(form: FormState): RememberedPreferences {
+  return {
+    version: 1,
+    locality: form.locality.trim(),
+    scope: form.scope,
+    language: form.language,
+    transportMode: form.transportMode,
+    householdSize: form.householdSize,
+    communitySize: form.communitySize,
+  };
+}
+
+/** localStorage is an untrusted input boundary, so validate before restoring it. */
+export function parseRememberedPreferences(raw: string | null): RememberedPreferences | null {
+  if (!raw) return null;
+
+  try {
+    const value = JSON.parse(raw) as Record<string, unknown>;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+
+    const locality = typeof value.locality === 'string' ? value.locality : '';
+    const validLocality =
+      locality.trim().length > 0 && locality.length <= 120 && !/[\r\n]/.test(locality);
+    const validScope = ['individual', 'family', 'community'].includes(value.scope as string);
+    const validLanguage = ['English', 'Hindi', 'Kannada'].includes(value.language as string);
+    const validTransport = ['walk', 'two_wheeler', 'car', 'public_transit', 'other'].includes(
+      value.transportMode as string
+    );
+    const validHousehold =
+      Number.isInteger(value.householdSize) &&
+      Number(value.householdSize) >= 1 &&
+      Number(value.householdSize) <= 30;
+    const validCommunity =
+      Number.isInteger(value.communitySize) &&
+      Number(value.communitySize) >= 2 &&
+      Number(value.communitySize) <= 5000;
+
+    if (
+      value.version !== 1 ||
+      !validLocality ||
+      !validScope ||
+      !validLanguage ||
+      !validTransport ||
+      !validHousehold ||
+      !validCommunity
+    ) {
+      return null;
+    }
+
+    return {
+      version: 1,
+      locality: locality.trim(),
+      scope: value.scope as Scope,
+      language: value.language as Language,
+      transportMode: value.transportMode as TransportMode,
+      householdSize: value.householdSize as number,
+      communitySize: value.communitySize as number,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** Demo chips only prefill form fields — submit still hits live APIs. */
 export const DEMO_SCENARIOS: Array<{
   id: string;

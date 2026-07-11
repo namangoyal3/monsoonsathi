@@ -68,7 +68,7 @@ Measured on 11 July 2026:
 - Rate limiting is per-instance memory, not a distributed limiter.
 - Weather cache TTL means conditions can lag by a few minutes.
 - Hindi/Kannada output quality depends on the model; validators check structure and safety, not fluency.
-- No offline mode, no user accounts, no persistence — by design for the competition MVP.
+- No offline mode, user accounts, or server-side persistence. Opt-in device memory stores only allowlisted basic preferences; it excludes destination, support needs, personal notes, and plans.
 - Community scope generates guidance for a generic community profile; it does not ingest real community rosters.
 
 ## Demo sequence (~3 minutes)
