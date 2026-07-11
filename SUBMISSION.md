@@ -43,7 +43,7 @@ Summarized from `docs/SECURITY.md`:
 - `npm run lint` — passed.
 - `npm run typecheck` — passed.
 - `npm run selfcheck` — passed.
-- `npm test` — 19/19 Vitest tests passed across two files.
+- `npm test` — 29/29 Vitest tests passed across four files (guards, route, provider-boundaries, route-boundaries).
 - `npm run build` — Next.js production build passed.
 - Local live-service smoke — HTTP 200, OpenWeather evidence, 4 checklist actions, 2 do-now actions, and `modelCalls: 1` on that run.
 - `npm audit` — zero high/critical findings. Two moderate advisories remain in Next.js's bundled PostCSS version; the proposed forced fix would downgrade Next.js and was not applied.

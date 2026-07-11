@@ -2,15 +2,89 @@
 
 > Live weather turned into personalized actions for you, your family, and your community.
 
-**PromptWars / Build with AI** submission for:
+**PromptWars / Build with AI** public submission  
+**Repository:** https://github.com/namangoyal3/monsoonsathi · **Live demo:** https://monsoonsathi.vercel.app  
+**Branch policy:** single branch (`main`) · **Tracked source size:** ~0.4 MB (well under 10 MB)
+
+Challenge prompt:
 
 > Design a GenAI-powered solution that helps individuals, families, and communities prepare for the monsoon season…
 
-## Solution
+---
 
-MonsoonSathi is a **monsoon action planner** (not a weather dashboard or chatbot):
+## Chosen vertical
 
-1. You describe locality, scope (individual / family / community), phase (before / during / after), language, and optional travel destination.
+**Monsoon preparedness assistant** for urban India (default persona: Bengaluru resident), covering:
+
+| Persona | What the assistant personalizes |
+|---|---|
+| **Individual** | Solo prep, travel, power/medicine continuity |
+| **Family** | Children, elderly, pregnancy, disability, pets, powered medical devices |
+| **Community** | Privacy-safe check-ins and shared resource guidance (no rosters stored) |
+
+Phases: **before** (prepare) · **during** (respond) · **after** (recover)  
+Languages: **English · Hindi · Kannada**
+
+## Approach and logic
+
+MonsoonSathi is a **smart action planner**, not a weather dashboard or free-form chatbot.
+
+| Layer | Role |
+|---|---|
+| **User context** | Locality, scope, phase, language, support needs, optional destination |
+| **Live facts** | OpenWeather geocode + conditions; optional OSRM car distance/time |
+| **GenAI decisioning** | Gemini builds prioritized actions from profile + verified evidence only |
+| **Safety wall** | Zod schema + semantic validators (phones, HTML, unknown sources, flood-safe claims) |
+| **Honest UI** | Labels *live weather fact* vs *AI-generated guidance*; fails closed (no mock plans) |
+
+Decision logic (always grounded in context):
+
+1. **Risk-aware prioritization** — elevated/severe weather risk and phase shift “do now” vs “do next”.
+2. **Support needs first** — elderly / powered device / medicines / community size force support actions.
+3. **Travel caution, never clearance** — destination yields `delay` / `reconsider` / `insufficient_data` only (never affirmative “go”).
+4. **Language-native output** — model generates in the selected language; no silent post-translation.
+
+## How the solution works
+
+1. User fills the planner form (or a demo chip that **only pre-fills fields**).
+2. `POST /api/plan` validates input (Zod), rate-limits, geocodes locality.
+3. Server fetches live weather evidence (+ optional travel route context + NDMA guidance IDs).
+4. Gemini returns a **structured JSON plan** (one optional live repair if invalid).
+5. Completeness + semantic safety checks; incomplete/unsafe output → error, **never** a hardcoded plan.
+6. Dashboard shows weather facts, prioritized actions, checklist, sources, and limitations.
+
+```
+Browser → /api/plan → geocode → weather (+ route) → Gemini → validate → JSON plan
+```
+
+Code map: [docs/CODEMAP.md](docs/CODEMAP.md) · Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+
+## Assumptions
+
+- Users share a **coarse locality** (area/pincode), not a street address.
+- OpenWeather is a sufficient live weather signal for this MVP; IMD/NDMA **bulletins** are not fully integrated (publisher alerts labeled honestly when missing).
+- OSRM/straight-line distance is **context only** — not flood-passability or road-open proof.
+- Community plans are for a **generic group profile**, not real resident lists (privacy by design).
+- Guidance **supports** official instructions; it never replaces IMD, NDMA, or local authority orders.
+- One plan request needs live Gemini + OpenWeather keys; offline mode is out of scope.
+
+## Evaluation focus (where to look)
+
+| Area | How this repo addresses it |
+|---|---|
+| **Code quality** | Modular `lib/*` + thin UI (`form-config`, `plan-view`); single responsibility; CODEMAP |
+| **Security** | Server-only secrets, Zod boundary, prompt isolation, CSP headers, no `dangerouslySetInnerHTML` |
+| **Efficiency** | Short weather cache, compact Gemini schema, single repair attempt, rate limits |
+| **Testing** | Vitest unit/boundary tests, Playwright a11y/injection/smoke, `npm run verify` |
+| **Accessibility** | Skip link, labels, live regions, keyboard path, axe e2e |
+
+---
+
+## Solution (summary)
+
+MonsoonSathi is a **monsoon action planner**:
+
+1. You describe locality, scope, phase, language, and optional travel destination.
 2. The server resolves the location and fetches **live weather** (OpenWeather).
 3. **Live Gemini structured output** produces a personalized plan; invalid output gets one real repair attempt, never a canned fallback.
 4. Server-side Zod + safety validation rejects unsupported evidence citations, phone numbers, HTML, “flood-safe route” claims, and affirmative travel clearance.
