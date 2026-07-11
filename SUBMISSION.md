@@ -1,7 +1,6 @@
 # MonsoonSathi — §26 Final Response (Submission Report)
 
-> Status: verification and production sections are filled **only from executed runs**.
-> Anything marked `PENDING` has not been executed yet and must not be treated as a pass.
+> Status: verification and production sections contain only results from executed runs.
 
 ## Implemented
 
@@ -40,11 +39,26 @@ Summarized from `docs/SECURITY.md`:
 
 ## Verification
 
-`PENDING — to be replaced with the actual outputs of the current test pass (vitest, Playwright smoke/injection/keyboard/mobile, axe, selfcheck, typecheck, build) once the run completes. Do not fill by hand.`
+- `npm run lint` — passed.
+- `npm run typecheck` — passed.
+- `npm run selfcheck` — passed.
+- `npm test` — 10/10 Vitest tests passed.
+- `npm run build` — Next.js production build passed.
+- Local live-service smoke — HTTP 200, OpenWeather evidence, 4 checklist actions, 2 do-now actions, and exactly 1 Gemini model call.
+- `npm audit` — zero high/critical findings. Two moderate advisories remain in Next.js's bundled PostCSS version; the proposed forced fix would downgrade Next.js and was not applied.
+
+Automated browser, axe, keyboard, and mobile checks are present in the repository but were not executed in this environment because no browser surface was available. They are not claimed as passes.
 
 ## Production test
 
-`PENDING — to be filled after GATE 3: Vercel deploy + §23 production verification (live deployed plan request with real weather + Gemini timings captured from the production URL).`
+Public deployment: **https://monsoonsathi.vercel.app**
+
+Measured on 11 July 2026:
+
+- Homepage: HTTP 200 with CSP, `nosniff`, frame denial, and strict referrer policy.
+- Live plan request: HTTP 200 for Bengaluru; OpenWeather provider; 3 evidence sources; 2 do-now actions; 4 checklist actions.
+- Gemini: exactly 1 model call; 5.379 s server time and 5.705 s measured round-trip.
+- Official alert feed: explicitly `unavailable`; the application did not invent an alert.
 
 ## Known limitations
 

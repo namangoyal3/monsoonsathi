@@ -121,12 +121,14 @@ Demo chips on the form only fill inputs — every plan still requires a live Gem
 
 ### Production smoke (measured)
 
-| Scenario | Result |
+Executed against the public URL on 11 July 2026:
+
+| Check | Measured result |
 |---|---|
-| Family during + elderly/device | OpenWeather live, Gemini `modelCalls: 1`, personalized support |
-| Hindi individual | Non-English GenAI plan |
-| Travel to Electronic City | Travel advisory from Gemini |
-| Invalid locality | Honest `LOCATION_NOT_FOUND` (no fake plan) |
+| Homepage | HTTP 200; CSP, `X-Content-Type-Options`, `X-Frame-Options`, and strict referrer policy present |
+| Bengaluru individual plan | HTTP 200; OpenWeather; 3 evidence sources; 2 do-now actions; 4 checklist actions |
+| GenAI execution | Gemini `modelCalls: 1`; 5.379 s server time |
+| Alert honesty | `alertState: unavailable`; no alert was invented |
 
 ### Judge demo (3 min)
 
@@ -140,4 +142,3 @@ Demo chips on the form only fill inputs — every plan still requires a live Gem
 ### 60s pitch
 
 > MonsoonSathi turns live OpenWeather data into personalized monsoon actions with one Gemini call—individuals, families, and communities; before, during, and after; English, Hindi, and Kannada—with server-side safety validation and zero hardcoded AI results.
-
