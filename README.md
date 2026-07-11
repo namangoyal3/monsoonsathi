@@ -134,6 +134,8 @@ npm run verify      # lint + typecheck + selfcheck + unit tests + build
 npm run verify:live # verify + serial Playwright tests against live providers
 ```
 
+GitHub Actions runs `npm run verify` on every push and pull request. Live-provider E2E stays explicit to avoid consuming API quota in CI.
+
 ## Live services
 
 | Service | Purpose | Honest failure |

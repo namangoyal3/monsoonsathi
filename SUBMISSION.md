@@ -43,12 +43,12 @@ Summarized from `docs/SECURITY.md`:
 - `npm run lint` — passed.
 - `npm run typecheck` — passed.
 - `npm run selfcheck` — passed.
-- `npm test` — 29/29 Vitest tests passed across four files (guards, route, provider-boundaries, route-boundaries).
+- `npm test` — 28/28 Vitest tests passed across three files (guards, route, provider-boundaries).
 - `npm run build` — Next.js production build passed.
 - Local live-service smoke — HTTP 200, OpenWeather evidence, 4 checklist actions, 2 do-now actions, and `modelCalls: 1` on that run.
 - `npm audit` — zero high/critical findings. Two moderate advisories remain in Next.js's bundled PostCSS version; the proposed forced fix would downgrade Next.js and was not applied.
 
-- `npm run test:e2e` — 11/11 Playwright tests passed against the local live-service dev server: a11y (axe), home labels / demo chips, prompt-injection error surface with no leakage, keyboard-only operability, mobile viewport without horizontal scroll, and four live plan paths covering English, Hindi, Kannada, individual, family, community, and travel. The suite runs serially and paces live submits to protect provider quotas.
+- `npm run test:e2e` — 10/10 Playwright tests passed against the local live-service dev server: form and generated-result a11y (axe), home labels / demo chips, prompt-injection error surface with no leakage, keyboard-only operability, mobile viewport without horizontal scroll, and four live plan paths covering English, Hindi, Kannada, individual, family, community, and travel. The suite runs serially and paces live submits to protect provider quotas.
 - The injection spec caught `lib/geocode.ts` echoing raw unresolved input into the error panel; the message is now generic and never reflects user input.
 
 ## Production test

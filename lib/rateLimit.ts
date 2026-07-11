@@ -1,4 +1,4 @@
-/** Simple per-instance fixed-window rate limiter (serverless-friendly secondary guard). */
+/** ponytail: per-instance fixed window is an MVP guard; use a shared store when scaling out. */
 
 type Bucket = { count: number; resetAt: number };
 

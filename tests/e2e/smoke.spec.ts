@@ -1,8 +1,15 @@
 import { test, expect } from '@playwright/test';
+import AxeBuilder from '@axe-core/playwright';
 import { reserveLivePlanSlot } from './throttle';
 
 const scenarios = [
-  { name: 'family during English', demo: /family · during · en/i, lang: 'en', support: true },
+  {
+    name: 'family during English',
+    demo: /family · during · en/i,
+    lang: 'en',
+    support: true,
+    a11y: true,
+  },
   { name: 'community after Kannada', demo: /community · after · kn/i, lang: 'kn', support: true },
   { name: 'individual before Hindi', demo: /individual · before · hi/i, lang: 'hi' },
   { name: 'travel stress English', demo: /travel stress · en/i, lang: 'en', travel: true },
@@ -31,6 +38,18 @@ for (const scenario of scenarios) {
       const travelTitle = page.locator('#travel-title');
       await expect(travelTitle).toBeVisible();
       await expect(travelTitle).not.toContainText(/recommendation:\s*go/i);
+    }
+    if ('a11y' in scenario && scenario.a11y) {
+      const results = await new AxeBuilder({ page })
+        .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+        .analyze();
+      expect(
+        results.violations.map((v) => ({
+          id: v.id,
+          impact: v.impact,
+          nodes: v.nodes.slice(0, 3).map((n) => n.target.join(' ')),
+        }))
+      ).toEqual([]);
     }
   });
 }

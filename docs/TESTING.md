@@ -17,15 +17,15 @@ npm run verify:live # deterministic checks, production build, then live E2E
 | Layer | Cases |
 |---|---|
 | Unit/API | Profile validation, enum coercion, unsafe route/travel rejection, phone rejection, unknown/mismatched evidence rejection, alert grounding, weather codes, cache/rate-limit bounds, body-size and invalid-JSON handling |
-| E2E | Home labels + axe, demo chips fill form only, prompt-injection error surface (no leakage), keyboard-only operability, mobile viewport, and four live plan paths |
+| E2E | Home labels + form/result axe scans, demo chips fill form only, prompt-injection error surface (no leakage), keyboard-only operability, mobile viewport, and four live plan paths |
 | Manual/live | English/Hindi/Kannada generation, individual/family/community scopes, travel evidence and disclaimer |
 
 ## Latest local results
 
 Run on the final build (live APIs, no mocks):
 
-- `npm test` (vitest): **19/19 passed** across `tests/unit/guards.test.ts` and `tests/unit/route.test.ts`
-- `npm run test:e2e` (playwright): **11/11 passed** across 6 spec files, including four real OpenWeather + Gemini submissions, in ~32.4s
+- `npm test` (vitest): **28/28 passed** across 3 unit spec files
+- `npm run test:e2e` (playwright): **10/10 passed** across 6 spec files, including four real OpenWeather + Gemini submissions and an axe scan of a generated plan, in 41.7s
 
 Notes:
 
